@@ -109,6 +109,7 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 		// Try tab-separated format first (from pdf.js client-side extraction)
 		if strings.Contains(line, "\t") {
 			if txn, ok := p.tryTabSeparated(line); ok {
+				txn.ParseMethod = "tab-separated"
 				transactions = append(transactions, txn)
 				continue
 			}
@@ -116,24 +117,28 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 
 		// Try strict text-date pattern (DD Mon YY) with double-space column separator
 		if txn, ok := p.tryPattern(hsbcTxnPattern, line); ok {
+			txn.ParseMethod = "strict-text-date"
 			transactions = append(transactions, txn)
 			continue
 		}
 
 		// Try flexible text-date pattern (single-space separator)
 		if txn, ok := p.tryPattern(hsbcTxnFlexible, line); ok {
+			txn.ParseMethod = "flexible-text-date"
 			transactions = append(transactions, txn)
 			continue
 		}
 
 		// Try dash-date pattern (DD-Mon-YY)
 		if txn, ok := p.tryPattern(hsbcDashDatePattern, line); ok {
+			txn.ParseMethod = "dash-date"
 			transactions = append(transactions, txn)
 			continue
 		}
 
 		// Try slash-date pattern (DD/MM/YYYY)
 		if txn, ok := p.tryPattern(hsbcSlashDatePattern, line); ok {
+			txn.ParseMethod = "slash-date"
 			transactions = append(transactions, txn)
 			continue
 		}
@@ -151,12 +156,14 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 			} else {
 				txn.Type = "CREDIT"
 			}
+			txn.ParseMethod = "simple"
 			transactions = append(transactions, txn)
 			continue
 		}
 
 		// Try generic: line starts with date, has amounts somewhere at the end
 		if txn, ok := p.tryGenericDateLine(line); ok {
+			txn.ParseMethod = "generic-date-line"
 			transactions = append(transactions, txn)
 			continue
 		}
@@ -304,7 +311,13 @@ func (p *HSBCParser) tryGenericDateLine(line string) (models.Transaction, bool) 
 		return models.Transaction{}, false
 	}
 
-	rest := strings.TrimSpace(line[len(date):])
+	// Find where the date actually starts in the line
+	// (handles stray characters before the date, e.g., "A 30 Dec 25")
+	dateIdx := strings.Index(line, date)
+	if dateIdx < 0 {
+		return models.Transaction{}, false
+	}
+	rest := strings.TrimSpace(line[dateIdx+len(date):])
 	if rest == "" {
 		return models.Transaction{}, false
 	}

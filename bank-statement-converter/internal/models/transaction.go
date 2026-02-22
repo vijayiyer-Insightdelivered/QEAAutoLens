@@ -7,6 +7,7 @@ type Transaction struct {
 	Type        string  `json:"type"` // DEBIT or CREDIT
 	Amount      float64 `json:"amount"`
 	Balance     float64 `json:"balance"`
+	ParseMethod string  `json:"parseMethod,omitempty"` // debug: which parser method matched
 }
 
 // BankType represents supported bank statement formats.

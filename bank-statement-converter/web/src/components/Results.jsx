@@ -133,6 +133,7 @@ function Results({ data, onReset }) {
                   <th>Type</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
                   <th style={{ textAlign: 'right' }}>Balance</th>
+                  <th style={{ fontSize: '0.75rem', color: '#8899AA' }}>Method</th>
                 </tr>
               </thead>
               <tbody>
@@ -151,6 +152,9 @@ function Results({ data, onReset }) {
                     </td>
                     <td className="balance">
                       {txn.balance ? `\u00A3${fmt(txn.balance)}` : ''}
+                    </td>
+                    <td style={{ fontSize: '0.7rem', color: '#8899AA', fontFamily: 'monospace' }}>
+                      {txn.parseMethod || ''}
                     </td>
                   </tr>
                 ))}
