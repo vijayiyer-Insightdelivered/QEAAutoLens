@@ -28,6 +28,8 @@ type ConvertResponse struct {
 	TotalCredit  float64               `json:"totalCredit"`
 	Count        int                   `json:"count"`
 	RawText      string                `json:"rawText,omitempty"`
+	Version      string                `json:"version,omitempty"`
+	DebugLines   []models.DebugLine    `json:"debugLines,omitempty"`
 }
 
 // AccountInfo holds account metadata for the JSON response.
@@ -70,7 +72,7 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
-		"version": "1.0.0",
+		"version": "1.1.0",
 	})
 }
 
@@ -118,26 +120,42 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 	bankParam := r.FormValue("bank")
 	includeHeader := r.FormValue("header") != "false"
 
-	// Save uploaded file to temp location
-	tmpFile, err := os.CreateTemp("", "statement-*.pdf")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to create temp file.")
-		return
-	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
+	// Check if pre-extracted text was provided (from client-side pdf.js extraction)
+	extractedText := r.FormValue("extractedText")
+	var pages []string
 
-	if _, err := io.Copy(tmpFile, file); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save uploaded file.")
-		return
+	if extractedText != "" {
+		// Use the client-side extracted text (split by page separator)
+		for _, page := range strings.Split(extractedText, "\n---PAGE_BREAK---\n") {
+			page = strings.TrimSpace(page)
+			if page != "" {
+				pages = append(pages, page)
+			}
+		}
 	}
-	tmpFile.Close()
 
-	// Extract text from PDF
-	pages, err := extractor.ExtractText(tmpFile.Name())
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("PDF extraction failed: %v", err))
-		return
+	// If no pre-extracted text, try server-side extraction
+	if len(pages) == 0 {
+		tmpFile, err := os.CreateTemp("", "statement-*.pdf")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to create temp file.")
+			return
+		}
+		defer os.Remove(tmpFile.Name())
+		defer tmpFile.Close()
+
+		if _, err := io.Copy(tmpFile, file); err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to save uploaded file.")
+			return
+		}
+		tmpFile.Close()
+
+		var extractErr error
+		pages, extractErr = extractor.ExtractText(tmpFile.Name())
+		if extractErr != nil {
+			writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("PDF extraction failed: %v", extractErr))
+			return
+		}
 	}
 
 	// Determine bank type
@@ -208,6 +226,7 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		TotalDebit:   totalDebit,
 		TotalCredit:  totalCredit,
 		Count:        len(txns),
+		Version:      "1.1.0",
 	}
 
 	if info.AccountHolder != "" || info.AccountNumber != "" || info.SortCode != "" || info.StatementPeriod != "" {
@@ -219,10 +238,11 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include raw extracted text when no transactions found (helps debug parser issues)
-	if len(txns) == 0 {
-		resp.RawText = strings.Join(pages, "\n--- PAGE BREAK ---\n")
-	}
+	// Always include raw extracted text (helps debug parser issues)
+	resp.RawText = strings.Join(pages, "\n--- PAGE BREAK ---\n")
+
+	// Include debug lines for diagnosing parse issues
+	resp.DebugLines = info.DebugLines
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

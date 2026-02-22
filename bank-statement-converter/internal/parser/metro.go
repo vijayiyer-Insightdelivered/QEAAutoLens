@@ -139,9 +139,12 @@ func (p *MetroBankParser) parseLines(lines []string) []models.Transaction {
 
 func containsTransactionHeader(line string) bool {
 	lower := strings.ToLower(line)
+	// "paid" is included in the description check because HSBC PDFs use spread
+	// characters in headers (e.g. "Pay m e nt t y pe and de t ails") which makes
+	// "details" undetectable, but "Paid out" column header remains intact
 	return strings.Contains(lower, "date") &&
 		(strings.Contains(lower, "description") || strings.Contains(lower, "transaction") ||
-			strings.Contains(lower, "details")) &&
+			strings.Contains(lower, "details") || strings.Contains(lower, "paid")) &&
 		(strings.Contains(lower, "amount") || strings.Contains(lower, "paid") ||
 			strings.Contains(lower, "balance") || strings.Contains(lower, "money"))
 }

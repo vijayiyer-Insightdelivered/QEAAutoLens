@@ -1,7 +1,94 @@
 import { useState } from 'react'
+import * as pdfjsLib from 'pdfjs-dist'
 import FileUpload from './components/FileUpload'
 import Results from './components/Results'
 import './App.css'
+
+// Configure pdf.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url,
+).toString()
+
+// Extract text from PDF using pdf.js (Mozilla's PDF library)
+async function extractTextFromPDF(file) {
+  const arrayBuffer = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  const pages = []
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const textContent = await page.getTextContent()
+
+    const items = textContent.items.filter((item) => item.str.trim() !== '')
+    if (items.length === 0) continue
+
+    // Calculate average font height for adaptive column gap detection
+    let totalHeight = 0
+    let heightCount = 0
+    for (const item of items) {
+      const h = item.height || Math.abs(item.transform[3])
+      if (h > 0) {
+        totalHeight += h
+        heightCount++
+      }
+    }
+    const avgFontHeight = heightCount > 0 ? totalHeight / heightCount : 10
+    // Column gap threshold: gaps wider than ~3 character widths are column separators
+    const colGapThreshold = avgFontHeight * 2.5
+
+    // Group text items by Y position with tolerance (items within 3px are same row)
+    const groups = []
+    for (const item of items) {
+      const y = item.transform[5]
+      let found = false
+      for (const group of groups) {
+        if (Math.abs(group.y - y) < 3) {
+          group.items.push({
+            x: item.transform[4],
+            text: item.str,
+            width: item.width || 0,
+          })
+          // Update group Y to average for better clustering
+          group.y = (group.y * (group.items.length - 1) + y) / group.items.length
+          found = true
+          break
+        }
+      }
+      if (!found) {
+        groups.push({
+          y,
+          items: [{ x: item.transform[4], text: item.str, width: item.width || 0 }],
+        })
+      }
+    }
+
+    // Sort rows top-to-bottom (higher Y = higher on page in PDF coords)
+    groups.sort((a, b) => b.y - a.y)
+
+    const lines = []
+    for (const group of groups) {
+      group.items.sort((a, b) => a.x - b.x)
+      let line = ''
+      let prevEnd = 0
+      for (const item of group.items) {
+        const gap = item.x - prevEnd
+        if (line && gap > colGapThreshold) {
+          line += '\t' // tab = column separator
+        } else if (line && gap > 1) {
+          line += ' '
+        }
+        line += item.text
+        prevEnd = item.x + item.width
+      }
+      if (line.trim()) lines.push(line)
+    }
+
+    pages.push(lines.join('\n'))
+  }
+
+  return pages
+}
 
 function App() {
   const [result, setResult] = useState(null)
@@ -13,13 +100,24 @@ function App() {
     setError(null)
     setResult(null)
 
-    const formData = new FormData()
-    formData.append('file', file)
-    if (bank) {
-      formData.append('bank', bank)
-    }
-
     try {
+      // Step 1: Extract text from PDF client-side using pdf.js
+      let extractedText = ''
+      try {
+        const pages = await extractTextFromPDF(file)
+        if (pages.length > 0) {
+          extractedText = pages.join('\n---PAGE_BREAK---\n')
+        }
+      } catch (pdfErr) {
+        console.warn('Client-side PDF extraction failed, falling back to server:', pdfErr)
+      }
+
+      // Step 2: Send to backend for parsing
+      const formData = new FormData()
+      formData.append('file', file)
+      if (bank) formData.append('bank', bank)
+      if (extractedText) formData.append('extractedText', extractedText)
+
       const res = await fetch('/api/convert', {
         method: 'POST',
         body: formData,
@@ -28,6 +126,8 @@ function App() {
       if (!data.success) {
         setError(data.error || 'Conversion failed.')
       } else {
+        // Attach the frontend's own extracted text for debugging
+        data.frontendText = extractedText
         setResult(data)
       }
     } catch {
