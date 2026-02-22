@@ -29,6 +29,7 @@ type ConvertResponse struct {
 	Count        int                   `json:"count"`
 	RawText      string                `json:"rawText,omitempty"`
 	Version      string                `json:"version,omitempty"`
+	DebugLines   []models.DebugLine    `json:"debugLines,omitempty"`
 }
 
 // AccountInfo holds account metadata for the JSON response.
@@ -239,6 +240,9 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 
 	// Always include raw extracted text (helps debug parser issues)
 	resp.RawText = strings.Join(pages, "\n--- PAGE BREAK ---\n")
+
+	// Include debug lines for diagnosing parse issues
+	resp.DebugLines = info.DebugLines
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

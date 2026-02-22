@@ -65,8 +65,9 @@ func (p *HSBCParser) Parse(pages []string) (*models.StatementInfo, error) {
 
 	for _, page := range pages {
 		lines := strings.Split(page, "\n")
-		txns := p.parseLines(lines)
+		txns, debugLines := p.parseLines(lines)
 		info.Transactions = append(info.Transactions, txns...)
+		info.DebugLines = append(info.DebugLines, debugLines...)
 	}
 
 	// Post-process: determine debit/credit by comparing balance changes
@@ -83,8 +84,9 @@ func normalizeLine(line string) string {
 	return strings.TrimSpace(line)
 }
 
-func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
+func (p *HSBCParser) parseLines(lines []string) ([]models.Transaction, []models.DebugLine) {
 	var transactions []models.Transaction
+	var debugLines []models.DebugLine
 	inTransactionSection := false
 
 	for i := 0; i < len(lines); i++ {
@@ -93,24 +95,51 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 			continue
 		}
 
+		hasDate := startsWithDate(line)
+		hasTab := strings.Contains(line, "\t")
+		tabParts := 0
+		if hasTab {
+			tabParts = len(strings.Split(line, "\t"))
+		}
+
+		dl := models.DebugLine{
+			LineNum:  i + 1,
+			HasDate:  hasDate,
+			HasTab:   hasTab,
+			TabParts: tabParts,
+		}
+		// Truncate long lines for debug display
+		if len(line) > 120 {
+			dl.Text = line[:120] + "..."
+		} else {
+			dl.Text = line
+		}
+
 		if containsTransactionHeader(line) {
 			inTransactionSection = true
+			dl.Result = "header"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
-		if !inTransactionSection && !startsWithDate(line) {
+		if !inTransactionSection && !hasDate {
+			dl.Result = "skipped-pre-section"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
-		if startsWithDate(line) {
+		if hasDate {
 			inTransactionSection = true
 		}
 
 		// Try tab-separated format first (from pdf.js client-side extraction)
-		if strings.Contains(line, "\t") {
+		if hasTab {
 			if txn, ok := p.tryTabSeparated(line); ok {
 				txn.ParseMethod = "tab-separated"
 				transactions = append(transactions, txn)
+				dl.Result = "parsed"
+				dl.Method = "tab-separated"
+				debugLines = append(debugLines, dl)
 				continue
 			}
 		}
@@ -119,6 +148,9 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 		if txn, ok := p.tryPattern(hsbcTxnPattern, line); ok {
 			txn.ParseMethod = "strict-text-date"
 			transactions = append(transactions, txn)
+			dl.Result = "parsed"
+			dl.Method = "strict-text-date"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
@@ -126,6 +158,9 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 		if txn, ok := p.tryPattern(hsbcTxnFlexible, line); ok {
 			txn.ParseMethod = "flexible-text-date"
 			transactions = append(transactions, txn)
+			dl.Result = "parsed"
+			dl.Method = "flexible-text-date"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
@@ -133,6 +168,9 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 		if txn, ok := p.tryPattern(hsbcDashDatePattern, line); ok {
 			txn.ParseMethod = "dash-date"
 			transactions = append(transactions, txn)
+			dl.Result = "parsed"
+			dl.Method = "dash-date"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
@@ -140,6 +178,9 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 		if txn, ok := p.tryPattern(hsbcSlashDatePattern, line); ok {
 			txn.ParseMethod = "slash-date"
 			transactions = append(transactions, txn)
+			dl.Result = "parsed"
+			dl.Method = "slash-date"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
@@ -158,6 +199,9 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 			}
 			txn.ParseMethod = "simple"
 			transactions = append(transactions, txn)
+			dl.Result = "parsed"
+			dl.Method = "simple"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
@@ -165,23 +209,31 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 		if txn, ok := p.tryGenericDateLine(line); ok {
 			txn.ParseMethod = "generic-date-line"
 			transactions = append(transactions, txn)
+			dl.Result = "parsed"
+			dl.Method = "generic-date-line"
+			debugLines = append(debugLines, dl)
 			continue
 		}
 
 		// Multi-line description continuation
-		if len(transactions) > 0 && !startsWithDate(line) && line != "" && inTransactionSection {
+		if len(transactions) > 0 && !hasDate && inTransactionSection {
 			if !isSummaryLine(line) {
 				last := &transactions[len(transactions)-1]
-				// Don't append if it looks like an amount
 				cleaned := strings.ReplaceAll(line, "\t", " ")
 				if !amountCellPattern.MatchString(strings.TrimSpace(cleaned)) {
 					last.Description += " " + strings.TrimSpace(cleaned)
+					dl.Result = "continuation"
+					debugLines = append(debugLines, dl)
+					continue
 				}
 			}
 		}
+
+		dl.Result = "unmatched"
+		debugLines = append(debugLines, dl)
 	}
 
-	return transactions
+	return transactions, debugLines
 }
 
 // tryTabSeparated handles tab-separated lines from pdf.js extraction.

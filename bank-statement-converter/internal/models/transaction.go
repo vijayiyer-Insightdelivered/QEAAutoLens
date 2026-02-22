@@ -19,6 +19,17 @@ const (
 	BankBarclays BankType = "barclays"
 )
 
+// DebugLine captures what the parser did with each input line.
+type DebugLine struct {
+	LineNum  int    `json:"lineNum"`
+	Text     string `json:"text"`
+	HasDate  bool   `json:"hasDate"`
+	HasTab   bool   `json:"hasTab"`
+	Result   string `json:"result"` // "parsed", "skipped", "continuation", "header"
+	Method   string `json:"method,omitempty"`
+	TabParts int    `json:"tabParts,omitempty"`
+}
+
 // StatementInfo holds metadata extracted from the statement.
 type StatementInfo struct {
 	Bank            BankType
@@ -27,4 +38,5 @@ type StatementInfo struct {
 	SortCode        string
 	StatementPeriod string
 	Transactions    []Transaction
+	DebugLines      []DebugLine
 }

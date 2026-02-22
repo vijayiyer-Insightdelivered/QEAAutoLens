@@ -173,45 +173,72 @@ function Results({ data, onReset }) {
         )}
       </div>
 
-      {/* Debug: Raw extracted text (always available) */}
+      {/* Debug: Parser line-by-line analysis */}
+      {data.debugLines && data.debugLines.length > 0 && (
+        <details style={{ marginTop: '0.75rem' }} open>
+          <summary style={{ cursor: 'pointer', color: '#E86E29', fontSize: '0.85rem', fontWeight: 600 }}>
+            Debug: Parser line-by-line ({data.debugLines.length} lines processed)
+          </summary>
+          <div style={{ marginTop: '0.5rem', maxHeight: '400px', overflow: 'auto', borderRadius: '8px', background: '#0A1628' }}>
+            <table style={{ width: '100%', fontSize: '0.7rem', borderCollapse: 'collapse', fontFamily: 'monospace' }}>
+              <thead>
+                <tr style={{ color: '#8899AA', borderBottom: '1px solid #1a2a3a' }}>
+                  <th style={{ padding: '4px 6px', textAlign: 'left' }}>#</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'left' }}>Result</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'center' }}>Date?</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'center' }}>Tabs</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'left' }}>Method</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'left' }}>Line text</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.debugLines.map((dl, i) => {
+                  const colors = {
+                    'parsed': '#4ade80',
+                    'header': '#60a5fa',
+                    'continuation': '#fbbf24',
+                    'unmatched': '#ef4444',
+                    'skipped-pre-section': '#6b7280',
+                  }
+                  return (
+                    <tr key={i} style={{ color: colors[dl.result] || '#ccd6e0', borderBottom: '1px solid #111a28' }}>
+                      <td style={{ padding: '3px 6px' }}>{dl.lineNum}</td>
+                      <td style={{ padding: '3px 6px', fontWeight: 600 }}>{dl.result}</td>
+                      <td style={{ padding: '3px 6px', textAlign: 'center' }}>{dl.hasDate ? 'Y' : ''}</td>
+                      <td style={{ padding: '3px 6px', textAlign: 'center' }}>{dl.tabParts || ''}</td>
+                      <td style={{ padding: '3px 6px' }}>{dl.method || ''}</td>
+                      <td style={{ padding: '3px 6px', maxWidth: '500px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {dl.text.replace(/\t/g, ' → ')}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
+      {/* Debug: Raw extracted text */}
       {(data.rawText || data.frontendText) && (
         <details style={{ marginTop: '0.75rem' }}>
           <summary style={{ cursor: 'pointer', color: '#8899AA', fontSize: '0.85rem', fontWeight: 600 }}>
             Debug: Show raw extracted text
           </summary>
           {data.rawText && (
-            <>
-              <div style={{ fontSize: '0.75rem', color: '#8899AA', marginTop: '0.5rem' }}>Backend rawText:</div>
-              <pre style={{
-                padding: '1rem',
-                background: '#0A1628',
-                color: '#ccd6e0',
-                borderRadius: '8px',
-                fontSize: '0.72rem',
-                lineHeight: '1.4',
-                maxHeight: '300px',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-              }}>{data.rawText.replace(/\t/g, ' → ')}</pre>
-            </>
-          )}
-          {data.frontendText && (
-            <>
-              <div style={{ fontSize: '0.75rem', color: '#8899AA', marginTop: '0.5rem' }}>Frontend extractedText (sent to backend):</div>
-              <pre style={{
-                padding: '1rem',
-                background: '#0A1628',
-                color: '#a3e0a3',
-                borderRadius: '8px',
-                fontSize: '0.72rem',
-                lineHeight: '1.4',
-                maxHeight: '300px',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-              }}>{data.frontendText.replace(/\t/g, ' → ')}</pre>
-            </>
+            <pre style={{
+              marginTop: '0.5rem',
+              padding: '1rem',
+              background: '#0A1628',
+              color: '#ccd6e0',
+              borderRadius: '8px',
+              fontSize: '0.72rem',
+              lineHeight: '1.4',
+              maxHeight: '300px',
+              overflow: 'auto',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+            }}>{data.rawText.replace(/\t/g, ' → ')}</pre>
           )}
         </details>
       )}
