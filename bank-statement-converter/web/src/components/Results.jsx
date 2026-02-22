@@ -164,25 +164,55 @@ function Results({ data, onReset }) {
         )}
       </div>
 
+      {/* Version indicator */}
+      <div style={{ marginTop: '1.5rem', padding: '0.5rem 1rem', background: '#1a2a3a', borderRadius: '6px', fontSize: '0.75rem', color: '#8899AA', display: 'flex', gap: '1rem' }}>
+        <span>Backend: <strong style={{ color: data.version ? '#4ade80' : '#ef4444' }}>{data.version || 'OLD (no version)'}</strong></span>
+        <span>Transactions: {count}</span>
+        {transactions.length > 0 && transactions[0].parseMethod && (
+          <span>Parse method: <strong style={{ color: '#60a5fa' }}>{transactions[0].parseMethod}</strong></span>
+        )}
+      </div>
+
       {/* Debug: Raw extracted text (always available) */}
-      {data.rawText && (
-        <details style={{ marginTop: '1.5rem' }}>
+      {(data.rawText || data.frontendText) && (
+        <details style={{ marginTop: '0.75rem' }}>
           <summary style={{ cursor: 'pointer', color: '#8899AA', fontSize: '0.85rem', fontWeight: 600 }}>
             Debug: Show raw extracted text
           </summary>
-          <pre style={{
-            marginTop: '0.5rem',
-            padding: '1rem',
-            background: '#0A1628',
-            color: '#ccd6e0',
-            borderRadius: '8px',
-            fontSize: '0.72rem',
-            lineHeight: '1.4',
-            maxHeight: '400px',
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}>{data.rawText.replace(/\t/g, ' → ')}</pre>
+          {data.rawText && (
+            <>
+              <div style={{ fontSize: '0.75rem', color: '#8899AA', marginTop: '0.5rem' }}>Backend rawText:</div>
+              <pre style={{
+                padding: '1rem',
+                background: '#0A1628',
+                color: '#ccd6e0',
+                borderRadius: '8px',
+                fontSize: '0.72rem',
+                lineHeight: '1.4',
+                maxHeight: '300px',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}>{data.rawText.replace(/\t/g, ' → ')}</pre>
+            </>
+          )}
+          {data.frontendText && (
+            <>
+              <div style={{ fontSize: '0.75rem', color: '#8899AA', marginTop: '0.5rem' }}>Frontend extractedText (sent to backend):</div>
+              <pre style={{
+                padding: '1rem',
+                background: '#0A1628',
+                color: '#a3e0a3',
+                borderRadius: '8px',
+                fontSize: '0.72rem',
+                lineHeight: '1.4',
+                maxHeight: '300px',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}>{data.frontendText.replace(/\t/g, ' → ')}</pre>
+            </>
+          )}
         </details>
       )}
     </div>

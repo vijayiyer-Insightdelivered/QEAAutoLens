@@ -126,6 +126,8 @@ function App() {
       if (!data.success) {
         setError(data.error || 'Conversion failed.')
       } else {
+        // Attach the frontend's own extracted text for debugging
+        data.frontendText = extractedText
         setResult(data)
       }
     } catch {

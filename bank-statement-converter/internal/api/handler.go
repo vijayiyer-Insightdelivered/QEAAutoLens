@@ -28,6 +28,7 @@ type ConvertResponse struct {
 	TotalCredit  float64               `json:"totalCredit"`
 	Count        int                   `json:"count"`
 	RawText      string                `json:"rawText,omitempty"`
+	Version      string                `json:"version,omitempty"`
 }
 
 // AccountInfo holds account metadata for the JSON response.
@@ -70,7 +71,7 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
-		"version": "1.0.0",
+		"version": "1.1.0",
 	})
 }
 
@@ -224,6 +225,7 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		TotalDebit:   totalDebit,
 		TotalCredit:  totalCredit,
 		Count:        len(txns),
+		Version:      "1.1.0",
 	}
 
 	if info.AccountHolder != "" || info.AccountNumber != "" || info.SortCode != "" || info.StatementPeriod != "" {
