@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -120,6 +121,61 @@ func TestHSBCParser_TabSplitDescription(t *testing.T) {
 
 	if len(info.Transactions) < 2 {
 		t.Fatalf("expected 2 transactions, got %d", len(info.Transactions))
+	}
+}
+
+// Test with actual HSBC PDF output (spread chars, stray "A", dot placeholders)
+func TestHSBCParser_RealHSBCFormat(t *testing.T) {
+	p := &HSBCParser{}
+
+	// Exact format from actual HSBC PDF via pdf.js extraction
+	pages := []string{
+		"HSBC UK Bank plc\n" +
+			"Account Nam e\tS ortcode\tAccount Num ber\n" +
+			"THINKWISE VENTURES LIMITED\t40-21-27\t11623176\n" +
+			"Date\tPay m e nt t y pe and de t ails\tPaid out\tPaid in\tBalance\n" +
+			"A 30 Dec 25\tBALANCE BROUGHT FORWARD\t.\t5,107.87\n" +
+			"30 Jan 26\tCR GROSS INTEREST TO 29JAN2026\t6.07\t5,113.94\n" +
+			"30 Jan 26\tBALANCE CARRIED FORWARD\t5,113.94",
+	}
+
+	info, err := p.Parse(pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	t.Logf("parsed %d transactions", len(info.Transactions))
+	for i, txn := range info.Transactions {
+		t.Logf("  [%d] %s | %q | %s | %.2f | %.2f",
+			i, txn.Date, txn.Description, txn.Type, txn.Amount, txn.Balance)
+	}
+
+	if len(info.Transactions) < 3 {
+		t.Fatalf("expected at least 3 transactions, got %d", len(info.Transactions))
+	}
+
+	// Verify descriptions are clean (no "25" or "." artifacts)
+	for _, txn := range info.Transactions {
+		if strings.Contains(txn.Description, " .") || strings.HasPrefix(txn.Description, "25 ") {
+			t.Errorf("description has artifacts: %q", txn.Description)
+		}
+	}
+
+	// Verify the interest transaction is present
+	found := false
+	for _, txn := range info.Transactions {
+		if strings.Contains(txn.Description, "INTEREST") {
+			found = true
+			if txn.Amount != 6.07 {
+				t.Errorf("interest amount: got %.2f, want 6.07", txn.Amount)
+			}
+			if txn.Type != "CREDIT" {
+				t.Errorf("interest type: got %s, want CREDIT", txn.Type)
+			}
+		}
+	}
+	if !found {
+		t.Error("interest transaction not found")
 	}
 }
 

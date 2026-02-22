@@ -197,6 +197,13 @@ func (p *HSBCParser) tryTabSeparated(line string) (models.Transaction, bool) {
 		return models.Transaction{}, false
 	}
 
+	// Find where the date actually starts in the first cell
+	// (handles stray characters like "A 30 Dec 25" where "A" is a PDF artifact)
+	dateIdx := strings.Index(parts[0], date)
+	if dateIdx < 0 {
+		return models.Transaction{}, false
+	}
+
 	// Scan from the right to find amount cells
 	var amounts []float64
 	rightBoundary := len(parts)
@@ -220,16 +227,18 @@ func (p *HSBCParser) tryTabSeparated(line string) (models.Transaction, bool) {
 
 	// Build description from everything between date and amounts
 	var descParts []string
-	// Rest of first cell after the date
-	rest := strings.TrimSpace(parts[0][len(date):])
+	// Rest of first cell after the date (skip any chars before the date too)
+	rest := strings.TrimSpace(parts[0][dateIdx+len(date):])
 	if rest != "" {
 		descParts = append(descParts, rest)
 	}
 	for i := 1; i < rightBoundary; i++ {
 		cell := strings.TrimSpace(parts[i])
-		if cell != "" {
-			descParts = append(descParts, cell)
+		// Skip empty cells and PDF artifacts (single dots, single chars)
+		if cell == "" || cell == "." || cell == "-" || cell == "–" {
+			continue
 		}
+		descParts = append(descParts, cell)
 	}
 	description := strings.Join(descParts, " ")
 
