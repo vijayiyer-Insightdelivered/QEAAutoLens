@@ -1,5 +1,9 @@
 function Results({ data, onReset }) {
-  const { bank, accountInfo, transactions, csv, totalDebit, totalCredit, count } = data
+  const { bank, accountInfo, csv } = data
+  const transactions = data.transactions || []
+  const totalDebit = data.totalDebit || 0
+  const totalCredit = data.totalCredit || 0
+  const count = data.count || transactions.length
 
   const bankNames = { metro: 'Metro Bank', hsbc: 'HSBC', barclays: 'Barclays' }
 
@@ -90,39 +94,50 @@ function Results({ data, onReset }) {
       {/* Transactions Table */}
       <div className="transactions-card">
         <h3>Transactions ({count})</h3>
-        <div className="table-wrapper">
-          <table className="txn-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Type</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
-                <th style={{ textAlign: 'right' }}>Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((txn, i) => (
-                <tr key={i}>
-                  <td>{txn.date}</td>
-                  <td>{txn.description}</td>
-                  <td>
-                    <span className={`type-badge ${txn.type === 'DEBIT' ? 'debit' : 'credit'}`}>
-                      {txn.type}
-                    </span>
-                  </td>
-                  <td className={`amount ${txn.type === 'DEBIT' ? 'debit' : 'credit'}`}>
-                    {txn.type === 'DEBIT' ? '-' : '+'}
-                    &pound;{txn.amount ? fmt(txn.amount) : '0.00'}
-                  </td>
-                  <td className="balance">
-                    {txn.balance ? `\u00A3${fmt(txn.balance)}` : ''}
-                  </td>
+        {transactions.length === 0 ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: '#8899AA' }}>
+            <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+              No transactions could be extracted from this statement.
+            </p>
+            <p style={{ fontSize: '0.9rem' }}>
+              The PDF format may not match the expected layout. Try selecting the bank manually or check that the PDF is not image-based (scanned).
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrapper">
+            <table className="txn-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Type</th>
+                  <th style={{ textAlign: 'right' }}>Amount</th>
+                  <th style={{ textAlign: 'right' }}>Balance</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {transactions.map((txn, i) => (
+                  <tr key={i}>
+                    <td>{txn.date}</td>
+                    <td>{txn.description}</td>
+                    <td>
+                      <span className={`type-badge ${txn.type === 'DEBIT' ? 'debit' : 'credit'}`}>
+                        {txn.type}
+                      </span>
+                    </td>
+                    <td className={`amount ${txn.type === 'DEBIT' ? 'debit' : 'credit'}`}>
+                      {txn.type === 'DEBIT' ? '-' : '+'}
+                      &pound;{txn.amount ? fmt(txn.amount) : '0.00'}
+                    </td>
+                    <td className="balance">
+                      {txn.balance ? `\u00A3${fmt(txn.balance)}` : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -21,27 +21,36 @@ func (p *HSBCParser) BankName() string {
 }
 
 // HSBC transaction line patterns
+// Note: PDF extraction can produce £ as "£", Unicode \u00A3, or omit it entirely.
+// We use [£\u00A3]? to handle all cases and \s+ for variable spacing.
 var hsbcTxnPattern = regexp.MustCompile(
 	`^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\s+` +
+		`(.+?)\s{2,}` +
+		`[£\x{00A3}]?([\d,]+\.\d{2})?\s+[£\x{00A3}]?([\d,]+\.\d{2})?\s+[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
+)
+
+// Relaxed variant: date + description + any 1-3 amounts separated by whitespace
+var hsbcTxnFlexible = regexp.MustCompile(
+	`^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\s+` +
 		`(.+?)\s+` +
-		`£?([\d,]+\.\d{2})?\s*£?([\d,]+\.\d{2})?\s*£?([\d,]+\.\d{2})\s*$`,
+		`[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
 )
 
 var hsbcTxnSimple = regexp.MustCompile(
 	`^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\s+` +
-		`(.+?)\s+£?([\d,]+\.\d{2})\s*$`,
+		`(.+?)\s+[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
 )
 
 // Pattern for DD-Mon-YY format (some HSBC variants)
 var hsbcDashDatePattern = regexp.MustCompile(
 	`^(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*-\d{2,4})\s+` +
-		`(.+?)\s+£?([\d,]+\.\d{2})?\s*£?([\d,]+\.\d{2})?\s*£?([\d,]+\.\d{2})\s*$`,
+		`(.+?)\s+[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
 )
 
 // Pattern for DD/MM/YYYY format (some HSBC statements use this)
 var hsbcSlashDatePattern = regexp.MustCompile(
 	`^(\d{1,2}/\d{1,2}/\d{2,4})\s+(.+?)\s+` +
-		`£?([\d,]+\.\d{2})?\s*£?([\d,]+\.\d{2})?\s*£?([\d,]+\.\d{2})\s*$`,
+		`[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
 )
 
 func (p *HSBCParser) Parse(pages []string) (*models.StatementInfo, error) {
@@ -65,12 +74,26 @@ func (p *HSBCParser) Parse(pages []string) (*models.StatementInfo, error) {
 	return info, nil
 }
 
+// normalizeLine cleans up common PDF extraction artifacts.
+func normalizeLine(line string) string {
+	// Replace Unicode pound sign with ASCII £
+	line = strings.ReplaceAll(line, "\u00A3", "£")
+	// Collapse multiple spaces to single (but preserve double-space as column separator)
+	// Remove zero-width characters
+	line = strings.ReplaceAll(line, "\u200B", "")
+	line = strings.ReplaceAll(line, "\u00A0", " ") // non-breaking space
+	return strings.TrimSpace(line)
+}
+
 func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 	var transactions []models.Transaction
 	inTransactionSection := false
 
 	for i := 0; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
+		line := normalizeLine(lines[i])
+		if line == "" {
+			continue
+		}
 
 		if containsTransactionHeader(line) {
 			inTransactionSection = true
@@ -85,8 +108,14 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 			inTransactionSection = true
 		}
 
-		// Try text-date pattern (DD Mon YY) - most common HSBC format
+		// Try strict text-date pattern (DD Mon YY) with double-space column separator
 		if txn, ok := p.tryPattern(hsbcTxnPattern, line); ok {
+			transactions = append(transactions, txn)
+			continue
+		}
+
+		// Try flexible text-date pattern (single-space separator)
+		if txn, ok := p.tryPattern(hsbcTxnFlexible, line); ok {
 			transactions = append(transactions, txn)
 			continue
 		}

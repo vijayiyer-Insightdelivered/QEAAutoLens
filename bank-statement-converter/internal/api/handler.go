@@ -22,7 +22,7 @@ type ConvertResponse struct {
 	Error        string                `json:"error,omitempty"`
 	Bank         string                `json:"bank,omitempty"`
 	AccountInfo  *AccountInfo          `json:"accountInfo,omitempty"`
-	Transactions []models.Transaction  `json:"transactions,omitempty"`
+	Transactions []models.Transaction  `json:"transactions"`
 	CSV          string                `json:"csv,omitempty"`
 	TotalDebit   float64               `json:"totalDebit"`
 	TotalCredit  float64               `json:"totalCredit"`
@@ -185,14 +185,20 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Ensure transactions is never nil (nil marshals to JSON null, not [])
+	txns := info.Transactions
+	if txns == nil {
+		txns = []models.Transaction{}
+	}
+
 	resp := ConvertResponse{
 		Success:      true,
 		Bank:         string(bankType),
-		Transactions: info.Transactions,
+		Transactions: txns,
 		CSV:          csvBuf.String(),
 		TotalDebit:   totalDebit,
 		TotalCredit:  totalCredit,
-		Count:        len(info.Transactions),
+		Count:        len(txns),
 	}
 
 	if info.AccountHolder != "" || info.AccountNumber != "" || info.SortCode != "" || info.StatementPeriod != "" {

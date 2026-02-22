@@ -19,12 +19,15 @@ var (
 // parseAmount converts a string like "1,234.56" or "-£1,234.56" to a float64.
 func parseAmount(s string) (float64, error) {
 	s = strings.TrimSpace(s)
-	// Remove currency symbols and whitespace
+	// Remove currency symbols and whitespace (including Unicode variants)
 	s = strings.ReplaceAll(s, "£", "")
+	s = strings.ReplaceAll(s, "\u00A3", "") // Unicode pound sign
 	s = strings.ReplaceAll(s, "$", "")
 	s = strings.ReplaceAll(s, "€", "")
+	s = strings.ReplaceAll(s, "\u20AC", "") // Unicode euro sign
 	s = strings.ReplaceAll(s, ",", "")
 	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, "\u00A0", "") // non-breaking space
 
 	if s == "" || s == "-" {
 		return 0, nil
