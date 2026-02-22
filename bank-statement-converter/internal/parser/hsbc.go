@@ -84,6 +84,15 @@ func normalizeLine(line string) string {
 	return strings.TrimSpace(line)
 }
 
+// isTerminalTransaction returns true for entries that mark the end of
+// the transaction section (e.g., BALANCE CARRIED FORWARD). No continuation
+// lines should be appended after these.
+func isTerminalTransaction(desc string) bool {
+	upper := strings.ToUpper(desc)
+	return strings.Contains(upper, "BALANCE CARRIED FORWARD") ||
+		strings.Contains(upper, "CLOSING BALANCE")
+}
+
 func (p *HSBCParser) parseLines(lines []string) ([]models.Transaction, []models.DebugLine) {
 	var transactions []models.Transaction
 	var debugLines []models.DebugLine
@@ -237,8 +246,9 @@ func (p *HSBCParser) parseLines(lines []string) ([]models.Transaction, []models.
 
 		// Multi-line description continuation
 		if len(transactions) > 0 && !hasDate && inTransactionSection {
-			if !isSummaryLine(line) {
-				last := &transactions[len(transactions)-1]
+			last := &transactions[len(transactions)-1]
+			// Don't append continuation to terminal entries like BALANCE CARRIED FORWARD
+			if !isTerminalTransaction(last.Description) && !isSummaryLine(line) {
 				cleaned := strings.ReplaceAll(line, "\t", " ")
 				if !amountCellPattern.MatchString(strings.TrimSpace(cleaned)) {
 					last.Description += " " + strings.TrimSpace(cleaned)
