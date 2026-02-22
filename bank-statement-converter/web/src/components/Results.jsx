@@ -159,6 +159,28 @@ function Results({ data, onReset }) {
           </div>
         )}
       </div>
+
+      {/* Debug: Raw extracted text (always available) */}
+      {data.rawText && (
+        <details style={{ marginTop: '1.5rem' }}>
+          <summary style={{ cursor: 'pointer', color: '#8899AA', fontSize: '0.85rem', fontWeight: 600 }}>
+            Debug: Show raw extracted text
+          </summary>
+          <pre style={{
+            marginTop: '0.5rem',
+            padding: '1rem',
+            background: '#0A1628',
+            color: '#ccd6e0',
+            borderRadius: '8px',
+            fontSize: '0.72rem',
+            lineHeight: '1.4',
+            maxHeight: '400px',
+            overflow: 'auto',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+          }}>{data.rawText.replace(/\t/g, ' → ')}</pre>
+        </details>
+      )}
     </div>
   )
 }

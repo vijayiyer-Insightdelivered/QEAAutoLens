@@ -235,10 +235,8 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include raw extracted text when no transactions found (helps debug parser issues)
-	if len(txns) == 0 {
-		resp.RawText = strings.Join(pages, "\n--- PAGE BREAK ---\n")
-	}
+	// Always include raw extracted text (helps debug parser issues)
+	resp.RawText = strings.Join(pages, "\n--- PAGE BREAK ---\n")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

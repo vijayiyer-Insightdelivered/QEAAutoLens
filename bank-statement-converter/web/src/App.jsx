@@ -20,37 +20,68 @@ async function extractTextFromPDF(file) {
     const page = await pdf.getPage(i)
     const textContent = await page.getTextContent()
 
-    // Group text items by Y position to reconstruct lines
     const items = textContent.items.filter((item) => item.str.trim() !== '')
     if (items.length === 0) continue
 
-    // Sort by Y (descending) then X (ascending) — PDF Y goes bottom-to-top
-    const rows = new Map()
+    // Calculate average font height for adaptive column gap detection
+    let totalHeight = 0
+    let heightCount = 0
     for (const item of items) {
-      const y = Math.round(item.transform[5]) // Y position
-      if (!rows.has(y)) rows.set(y, [])
-      rows.get(y).push({ x: item.transform[4], text: item.str, width: item.width })
+      const h = item.height || Math.abs(item.transform[3])
+      if (h > 0) {
+        totalHeight += h
+        heightCount++
+      }
+    }
+    const avgFontHeight = heightCount > 0 ? totalHeight / heightCount : 10
+    // Column gap threshold: gaps wider than ~3 character widths are column separators
+    const colGapThreshold = avgFontHeight * 2.5
+
+    // Group text items by Y position with tolerance (items within 3px are same row)
+    const groups = []
+    for (const item of items) {
+      const y = item.transform[5]
+      let found = false
+      for (const group of groups) {
+        if (Math.abs(group.y - y) < 3) {
+          group.items.push({
+            x: item.transform[4],
+            text: item.str,
+            width: item.width || 0,
+          })
+          // Update group Y to average for better clustering
+          group.y = (group.y * (group.items.length - 1) + y) / group.items.length
+          found = true
+          break
+        }
+      }
+      if (!found) {
+        groups.push({
+          y,
+          items: [{ x: item.transform[4], text: item.str, width: item.width || 0 }],
+        })
+      }
     }
 
-    // Sort rows top-to-bottom
-    const sortedYs = [...rows.keys()].sort((a, b) => b - a)
+    // Sort rows top-to-bottom (higher Y = higher on page in PDF coords)
+    groups.sort((a, b) => b.y - a.y)
+
     const lines = []
-    for (const y of sortedYs) {
-      const items = rows.get(y).sort((a, b) => a.x - b.x)
-      // Join items with appropriate spacing
+    for (const group of groups) {
+      group.items.sort((a, b) => a.x - b.x)
       let line = ''
       let prevEnd = 0
-      for (const item of items) {
+      for (const item of group.items) {
         const gap = item.x - prevEnd
-        if (line && gap > 10) {
-          line += '  ' // column separator
-        } else if (line && gap > 2) {
+        if (line && gap > colGapThreshold) {
+          line += '\t' // tab = column separator
+        } else if (line && gap > 1) {
           line += ' '
         }
         line += item.text
-        prevEnd = item.x + (item.width || 0)
+        prevEnd = item.x + item.width
       }
-      if (line.trim()) lines.push(line.trim())
+      if (line.trim()) lines.push(line)
     }
 
     pages.push(lines.join('\n'))

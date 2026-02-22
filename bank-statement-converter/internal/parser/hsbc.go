@@ -10,26 +10,26 @@ import (
 // HSBCParser handles HSBC bank statement PDFs.
 //
 // HSBC statements typically have this layout:
-//   Date | Payment type and details | Paid out | Paid in | Balance
+//
+//	Date | Payment type and details | Paid out | Paid in | Balance
 //
 // Date format: DD Mon YY (e.g., 15 Jan 24) or DD Mon YYYY
-// Example: "15 Jan 24  CARD PAYMENT TO TESCO  £25.99  £1,234.56"
 type HSBCParser struct{}
 
 func (p *HSBCParser) BankName() string {
 	return "HSBC"
 }
 
-// HSBC transaction line patterns
-// Note: PDF extraction can produce £ as "£", Unicode \u00A3, or omit it entirely.
-// We use [£\u00A3]? to handle all cases and \s+ for variable spacing.
+// amountCellPattern matches a cell containing a single monetary amount.
+var amountCellPattern = regexp.MustCompile(`^[£\x{00A3}]?\s*([\d,]+\.\d{2})\s*$`)
+
+// HSBC transaction line patterns (for non-tab-separated text)
 var hsbcTxnPattern = regexp.MustCompile(
 	`^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\s+` +
 		`(.+?)\s{2,}` +
 		`[£\x{00A3}]?([\d,]+\.\d{2})?\s+[£\x{00A3}]?([\d,]+\.\d{2})?\s+[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
 )
 
-// Relaxed variant: date + description + any 1-3 amounts separated by whitespace
 var hsbcTxnFlexible = regexp.MustCompile(
 	`^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\s+` +
 		`(.+?)\s+` +
@@ -41,13 +41,11 @@ var hsbcTxnSimple = regexp.MustCompile(
 		`(.+?)\s+[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
 )
 
-// Pattern for DD-Mon-YY format (some HSBC variants)
 var hsbcDashDatePattern = regexp.MustCompile(
 	`^(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*-\d{2,4})\s+` +
 		`(.+?)\s+[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
 )
 
-// Pattern for DD/MM/YYYY format (some HSBC statements use this)
 var hsbcSlashDatePattern = regexp.MustCompile(
 	`^(\d{1,2}/\d{1,2}/\d{2,4})\s+(.+?)\s+` +
 		`[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})?\s*[£\x{00A3}]?([\d,]+\.\d{2})\s*$`,
@@ -71,17 +69,17 @@ func (p *HSBCParser) Parse(pages []string) (*models.StatementInfo, error) {
 		info.Transactions = append(info.Transactions, txns...)
 	}
 
+	// Post-process: determine debit/credit by comparing balance changes
+	p.inferDebitCreditFromBalances(info.Transactions)
+
 	return info, nil
 }
 
 // normalizeLine cleans up common PDF extraction artifacts.
 func normalizeLine(line string) string {
-	// Replace Unicode pound sign with ASCII £
 	line = strings.ReplaceAll(line, "\u00A3", "£")
-	// Collapse multiple spaces to single (but preserve double-space as column separator)
-	// Remove zero-width characters
 	line = strings.ReplaceAll(line, "\u200B", "")
-	line = strings.ReplaceAll(line, "\u00A0", " ") // non-breaking space
+	line = strings.ReplaceAll(line, "\u00A0", " ")
 	return strings.TrimSpace(line)
 }
 
@@ -106,6 +104,14 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 
 		if startsWithDate(line) {
 			inTransactionSection = true
+		}
+
+		// Try tab-separated format first (from pdf.js client-side extraction)
+		if strings.Contains(line, "\t") {
+			if txn, ok := p.tryTabSeparated(line); ok {
+				transactions = append(transactions, txn)
+				continue
+			}
 		}
 
 		// Try strict text-date pattern (DD Mon YY) with double-space column separator
@@ -149,16 +155,216 @@ func (p *HSBCParser) parseLines(lines []string) []models.Transaction {
 			continue
 		}
 
+		// Try generic: line starts with date, has amounts somewhere at the end
+		if txn, ok := p.tryGenericDateLine(line); ok {
+			transactions = append(transactions, txn)
+			continue
+		}
+
 		// Multi-line description continuation
 		if len(transactions) > 0 && !startsWithDate(line) && line != "" && inTransactionSection {
 			if !isSummaryLine(line) {
 				last := &transactions[len(transactions)-1]
-				last.Description += " " + line
+				// Don't append if it looks like an amount
+				cleaned := strings.ReplaceAll(line, "\t", " ")
+				if !amountCellPattern.MatchString(strings.TrimSpace(cleaned)) {
+					last.Description += " " + strings.TrimSpace(cleaned)
+				}
 			}
 		}
 	}
 
 	return transactions
+}
+
+// tryTabSeparated handles tab-separated lines from pdf.js extraction.
+// Strategy: find the date at the start, find amounts from the right side,
+// everything in between is the description.
+func (p *HSBCParser) tryTabSeparated(line string) (models.Transaction, bool) {
+	parts := strings.Split(line, "\t")
+	if len(parts) < 2 {
+		return models.Transaction{}, false
+	}
+
+	// Clean up parts
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+
+	// First part (or first part of first cell) should contain a date
+	date := extractDate(parts[0])
+	if date == "" {
+		return models.Transaction{}, false
+	}
+
+	// Scan from the right to find amount cells
+	var amounts []float64
+	rightBoundary := len(parts)
+	for i := len(parts) - 1; i >= 1; i-- {
+		cell := strings.TrimSpace(parts[i])
+		if cell == "" {
+			continue // skip empty cells (empty column)
+		}
+		if m := amountCellPattern.FindStringSubmatch(cell); m != nil {
+			amt, _ := parseAmount(m[1])
+			amounts = append([]float64{amt}, amounts...) // prepend to keep order
+			rightBoundary = i
+		} else {
+			break // stop at first non-amount cell
+		}
+	}
+
+	if len(amounts) == 0 {
+		return models.Transaction{}, false
+	}
+
+	// Build description from everything between date and amounts
+	var descParts []string
+	// Rest of first cell after the date
+	rest := strings.TrimSpace(parts[0][len(date):])
+	if rest != "" {
+		descParts = append(descParts, rest)
+	}
+	for i := 1; i < rightBoundary; i++ {
+		cell := strings.TrimSpace(parts[i])
+		if cell != "" {
+			descParts = append(descParts, cell)
+		}
+	}
+	description := strings.Join(descParts, " ")
+
+	txn := models.Transaction{
+		Date:        date,
+		Description: description,
+	}
+
+	// Assign amounts based on count
+	switch len(amounts) {
+	case 1:
+		// Just a balance (e.g., "BALANCE BROUGHT FORWARD")
+		txn.Balance = amounts[0]
+		txn.Amount = 0
+		if isDebitDescription(description) {
+			txn.Type = "DEBIT"
+		} else {
+			txn.Type = "CREDIT"
+		}
+	case 2:
+		// One amount + balance
+		txn.Amount = amounts[0]
+		txn.Balance = amounts[1]
+		if isDebitDescription(description) {
+			txn.Type = "DEBIT"
+		} else {
+			txn.Type = "CREDIT"
+		}
+	case 3:
+		// paidOut + paidIn + balance
+		txn.Balance = amounts[2]
+		if amounts[0] > 0 && amounts[1] == 0 {
+			txn.Amount = amounts[0]
+			txn.Type = "DEBIT"
+		} else if amounts[1] > 0 {
+			txn.Amount = amounts[1]
+			txn.Type = "CREDIT"
+		} else {
+			txn.Amount = amounts[0]
+			txn.Type = "DEBIT"
+		}
+	default:
+		// More than 3 amounts — take last as balance, second-to-last as amount
+		txn.Balance = amounts[len(amounts)-1]
+		txn.Amount = amounts[len(amounts)-2]
+		if isDebitDescription(description) {
+			txn.Type = "DEBIT"
+		} else {
+			txn.Type = "CREDIT"
+		}
+	}
+
+	return txn, true
+}
+
+// tryGenericDateLine handles lines that start with a date and end with amounts,
+// regardless of separator style.
+var trailingAmountsPattern = regexp.MustCompile(`[£\x{00A3}]?([\d,]+\.\d{2})`)
+
+func (p *HSBCParser) tryGenericDateLine(line string) (models.Transaction, bool) {
+	date := extractDate(line)
+	if date == "" {
+		return models.Transaction{}, false
+	}
+
+	rest := strings.TrimSpace(line[len(date):])
+	if rest == "" {
+		return models.Transaction{}, false
+	}
+
+	// Find all amounts in the line
+	allAmounts := trailingAmountsPattern.FindAllStringIndex(rest, -1)
+	if len(allAmounts) == 0 {
+		return models.Transaction{}, false
+	}
+
+	// The description is everything before the first amount
+	firstAmountStart := allAmounts[0][0]
+	description := strings.TrimSpace(rest[:firstAmountStart])
+	if description == "" {
+		return models.Transaction{}, false
+	}
+
+	// Extract all amounts
+	amountMatches := trailingAmountsPattern.FindAllStringSubmatch(rest, -1)
+	var amounts []float64
+	for _, m := range amountMatches {
+		amt, _ := parseAmount(m[1])
+		amounts = append(amounts, amt)
+	}
+
+	txn := models.Transaction{
+		Date:        date,
+		Description: description,
+	}
+
+	switch len(amounts) {
+	case 1:
+		txn.Balance = amounts[0]
+		if isDebitDescription(description) {
+			txn.Type = "DEBIT"
+		} else {
+			txn.Type = "CREDIT"
+		}
+	case 2:
+		txn.Amount = amounts[0]
+		txn.Balance = amounts[1]
+		if isDebitDescription(description) {
+			txn.Type = "DEBIT"
+		} else {
+			txn.Type = "CREDIT"
+		}
+	case 3:
+		txn.Balance = amounts[2]
+		if amounts[0] > 0 && amounts[1] == 0 {
+			txn.Amount = amounts[0]
+			txn.Type = "DEBIT"
+		} else if amounts[1] > 0 {
+			txn.Amount = amounts[1]
+			txn.Type = "CREDIT"
+		} else {
+			txn.Amount = amounts[0]
+			txn.Type = "DEBIT"
+		}
+	default:
+		txn.Balance = amounts[len(amounts)-1]
+		txn.Amount = amounts[len(amounts)-2]
+		if isDebitDescription(description) {
+			txn.Type = "DEBIT"
+		} else {
+			txn.Type = "CREDIT"
+		}
+	}
+
+	return txn, true
 }
 
 func (p *HSBCParser) tryPattern(pat *regexp.Regexp, line string) (models.Transaction, bool) {
@@ -189,4 +395,42 @@ func (p *HSBCParser) tryPattern(pat *regexp.Regexp, line string) (models.Transac
 	}
 
 	return txn, true
+}
+
+// inferDebitCreditFromBalances uses balance progression to determine
+// whether each transaction is a debit or credit. This is more reliable
+// than keyword matching because it uses actual accounting math.
+func (p *HSBCParser) inferDebitCreditFromBalances(txns []models.Transaction) {
+	for i := 1; i < len(txns); i++ {
+		prev := txns[i-1]
+		curr := &txns[i]
+
+		// Only infer if both have a balance and current has an amount
+		if prev.Balance == 0 || curr.Balance == 0 || curr.Amount == 0 {
+			continue
+		}
+
+		diff := curr.Balance - prev.Balance
+		if diff < 0 {
+			// Balance went down — this is a debit (money out)
+			curr.Type = "DEBIT"
+			// If no amount was parsed, use the balance difference
+			if curr.Amount == 0 {
+				curr.Amount = abs(diff)
+			}
+		} else if diff > 0 {
+			// Balance went up — this is a credit (money in)
+			curr.Type = "CREDIT"
+			if curr.Amount == 0 {
+				curr.Amount = diff
+			}
+		}
+	}
+}
+
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
