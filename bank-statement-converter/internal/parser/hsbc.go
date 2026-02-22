@@ -215,6 +215,26 @@ func (p *HSBCParser) parseLines(lines []string) ([]models.Transaction, []models.
 			continue
 		}
 
+		// Look-ahead: if this line has a date but no amounts were found,
+		// peek at the next line. If it doesn't start with a date and contains
+		// tab-separated amounts, join them and re-try (handles PDF line-split).
+		if hasDate && i+1 < len(lines) {
+			nextLine := normalizeLine(lines[i+1])
+			if nextLine != "" && !startsWithDate(nextLine) {
+				combined := line + "\t" + nextLine
+				if txn, ok := p.tryTabSeparated(combined); ok {
+					txn.ParseMethod = "tab-separated-joined"
+					transactions = append(transactions, txn)
+					dl.Result = "parsed"
+					dl.Method = "tab-joined"
+					dl.Text = dl.Text + " ⊕ " + nextLine
+					debugLines = append(debugLines, dl)
+					i++ // skip the next line since we consumed it
+					continue
+				}
+			}
+		}
+
 		// Multi-line description continuation
 		if len(transactions) > 0 && !hasDate && inTransactionSection {
 			if !isSummaryLine(line) {
