@@ -1,0 +1,105 @@
+package parser
+
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// Common date patterns found in UK bank statements.
+var (
+	// DD/MM/YYYY or DD/MM/YY
+	datePatternSlash = regexp.MustCompile(`\b(\d{1,2}/\d{1,2}/\d{2,4})\b`)
+	// DD Mon YYYY (e.g., 15 Jan 2024)
+	datePatternText = regexp.MustCompile(`\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\b`)
+	// DD-Mon-YYYY or DD-Mon-YY
+	datePatternDash = regexp.MustCompile(`\b(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*-\d{2,4})\b`)
+)
+
+// parseAmount converts a string like "1,234.56" or "-£1,234.56" to a float64.
+func parseAmount(s string) (float64, error) {
+	s = strings.TrimSpace(s)
+	// Remove currency symbols and whitespace
+	s = strings.ReplaceAll(s, "£", "")
+	s = strings.ReplaceAll(s, "$", "")
+	s = strings.ReplaceAll(s, "€", "")
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.ReplaceAll(s, " ", "")
+
+	if s == "" || s == "-" {
+		return 0, nil
+	}
+
+	return strconv.ParseFloat(s, 64)
+}
+
+// startsWithDate checks if a line begins with a date pattern.
+func startsWithDate(line string) bool {
+	line = strings.TrimSpace(line)
+	if datePatternSlash.MatchString(line) {
+		loc := datePatternSlash.FindStringIndex(line)
+		if loc != nil && loc[0] < 3 {
+			return true
+		}
+	}
+	if datePatternText.MatchString(line) {
+		loc := datePatternText.FindStringIndex(line)
+		if loc != nil && loc[0] < 3 {
+			return true
+		}
+	}
+	if datePatternDash.MatchString(line) {
+		loc := datePatternDash.FindStringIndex(line)
+		if loc != nil && loc[0] < 3 {
+			return true
+		}
+	}
+	return false
+}
+
+// extractDate returns the first date found at the start of a line.
+func extractDate(line string) string {
+	line = strings.TrimSpace(line)
+
+	if m := datePatternSlash.FindString(line); m != "" {
+		loc := datePatternSlash.FindStringIndex(line)
+		if loc != nil && loc[0] < 3 {
+			return m
+		}
+	}
+	if m := datePatternText.FindString(line); m != "" {
+		loc := datePatternText.FindStringIndex(line)
+		if loc != nil && loc[0] < 3 {
+			return m
+		}
+	}
+	if m := datePatternDash.FindString(line); m != "" {
+		loc := datePatternDash.FindStringIndex(line)
+		if loc != nil && loc[0] < 3 {
+			return m
+		}
+	}
+	return ""
+}
+
+// splitFields splits a line into whitespace-separated fields,
+// but preserves quoted strings and description text.
+func splitFields(line string) []string {
+	return strings.Fields(line)
+}
+
+// extractAccountNumber finds typical UK bank account numbers (8 digits).
+var accountNumberPattern = regexp.MustCompile(`\b(\d{8})\b`)
+
+// extractSortCode finds typical UK sort codes (XX-XX-XX).
+var sortCodePattern = regexp.MustCompile(`\b(\d{2}-\d{2}-\d{2})\b`)
+
+func findAccountNumber(text string) string {
+	m := accountNumberPattern.FindString(text)
+	return m
+}
+
+func findSortCode(text string) string {
+	m := sortCodePattern.FindString(text)
+	return m
+}

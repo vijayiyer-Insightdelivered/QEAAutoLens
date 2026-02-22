@@ -1,0 +1,10 @@
+# Binary
+bank-statement-converter
+bank-statement-converter.exe
+
+# Output files
+*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
