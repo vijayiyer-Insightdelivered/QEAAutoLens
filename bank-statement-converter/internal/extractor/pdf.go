@@ -12,22 +12,52 @@ import (
 
 // ExtractText reads a PDF file and returns the text content of each page.
 // It tries multiple extraction methods to handle different PDF encodings.
-func ExtractText(filePath string) (pages []string, err error) {
+// If the structured PDF library fails, falls back to raw stream parsing.
+func ExtractText(filePath string) ([]string, error) {
+	// First, try the structured library (best layout preservation)
+	pages, libErr := extractWithLibrary(filePath)
+	if libErr == nil && totalTextLen(pages) > 50 {
+		return pages, nil
+	}
+
+	// Library failed or returned no text — fall back to raw stream extraction
+	rawPages, rawErr := ExtractTextRaw(filePath)
+	if rawErr == nil && totalTextLen(rawPages) > 50 {
+		return rawPages, nil
+	}
+
+	// Return the best result we have
+	if totalTextLen(pages) > 0 {
+		return pages, nil
+	}
+	if totalTextLen(rawPages) > 0 {
+		return rawPages, nil
+	}
+
+	// Both failed
+	if libErr != nil {
+		return nil, fmt.Errorf("PDF extraction failed: %v (raw fallback also found no text)", libErr)
+	}
+	return nil, fmt.Errorf("no text could be extracted from PDF (the file may be image-based/scanned)")
+}
+
+// extractWithLibrary uses the ledongthuc/pdf library with multiple methods.
+func extractWithLibrary(filePath string) (pages []string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("PDF library crashed (recovered): %v", r)
+			err = fmt.Errorf("PDF library crashed: %v", r)
 		}
 	}()
 
 	f, r, openErr := pdf.Open(filePath)
 	if openErr != nil {
-		return nil, fmt.Errorf("failed to open PDF %q: %w", filePath, openErr)
+		return nil, openErr
 	}
 	defer f.Close()
 
 	numPages := r.NumPage()
 	if numPages == 0 {
-		return nil, fmt.Errorf("PDF %q has no pages", filePath)
+		return nil, fmt.Errorf("PDF has no pages")
 	}
 
 	// Method 1: Try GetTextByRow (best layout preservation)
@@ -54,15 +84,7 @@ func ExtractText(filePath string) (pages []string, err error) {
 		return []string{plainText}, nil
 	}
 
-	// Return whatever we got (may be empty)
-	if totalTextLen(pages) > 0 {
-		return pages, nil
-	}
-	if len(strings.TrimSpace(plainText)) > 0 {
-		return []string{plainText}, nil
-	}
-
-	return nil, fmt.Errorf("PDF %q: no text could be extracted (the PDF may be image-based/scanned)", filePath)
+	return pages, nil
 }
 
 // ExtractTextCombined reads a PDF and returns all text combined into one string.
