@@ -27,6 +27,7 @@ type ConvertResponse struct {
 	TotalDebit   float64               `json:"totalDebit"`
 	TotalCredit  float64               `json:"totalCredit"`
 	Count        int                   `json:"count"`
+	RawText      string                `json:"rawText,omitempty"`
 }
 
 // AccountInfo holds account metadata for the JSON response.
@@ -75,6 +76,14 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 	setCORS(w)
+
+	// Recover from any panics to prevent server crash
+	defer func() {
+		if rec := recover(); rec != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Internal server error (recovered from crash): %v", rec))
+		}
+	}()
+
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -208,6 +217,11 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 			SortCode: info.SortCode,
 			Period:   info.StatementPeriod,
 		}
+	}
+
+	// Include raw extracted text when no transactions found (helps debug parser issues)
+	if len(txns) == 0 {
+		resp.RawText = strings.Join(pages, "\n--- PAGE BREAK ---\n")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
