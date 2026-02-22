@@ -95,13 +95,33 @@ function Results({ data, onReset }) {
       <div className="transactions-card">
         <h3>Transactions ({count})</h3>
         {transactions.length === 0 ? (
-          <div style={{ padding: '2rem', textAlign: 'center', color: '#8899AA' }}>
-            <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+          <div style={{ padding: '2rem', color: '#8899AA' }}>
+            <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem', textAlign: 'center' }}>
               No transactions could be extracted from this statement.
             </p>
-            <p style={{ fontSize: '0.9rem' }}>
+            <p style={{ fontSize: '0.9rem', textAlign: 'center', marginBottom: '1rem' }}>
               The PDF format may not match the expected layout. Try selecting the bank manually or check that the PDF is not image-based (scanned).
             </p>
+            {data.rawText && (
+              <details style={{ marginTop: '1rem' }}>
+                <summary style={{ cursor: 'pointer', color: '#E86E29', fontWeight: 600 }}>
+                  Show extracted PDF text (for debugging)
+                </summary>
+                <pre style={{
+                  marginTop: '0.5rem',
+                  padding: '1rem',
+                  background: '#0A1628',
+                  color: '#ccd6e0',
+                  borderRadius: '8px',
+                  fontSize: '0.75rem',
+                  lineHeight: '1.4',
+                  maxHeight: '400px',
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}>{data.rawText}</pre>
+              </details>
+            )}
           </div>
         ) : (
           <div className="table-wrapper">
