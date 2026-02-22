@@ -3,6 +3,7 @@ package extractor
 import (
 	"bytes"
 	"compress/zlib"
+	"encoding/hex"
 	"io"
 	"os"
 	"regexp"
@@ -11,13 +12,13 @@ import (
 )
 
 // ExtractTextRaw is a fallback PDF text extractor that works directly with
-// the raw PDF byte stream. It does not rely on the ledongthuc/pdf library,
-// which crashes on some PDFs. Instead it:
-//  1. Finds all stream/endstream blocks in the PDF
-//  2. Decompresses FlateDecode (zlib) streams
-//  3. Extracts text from PDF text operators (Tj, TJ, ', ")
+// the raw PDF byte stream. It does not rely on the ledongthuc/pdf library.
 //
-// This handles PDFs that the structured parser chokes on.
+// It handles PDFs with custom font encodings (CIDFont/Type0) by:
+//  1. Finding all ToUnicode CMap streams and building character mappings
+//  2. Finding content streams with text operators (Tj, TJ)
+//  3. Decoding both literal strings (...) and hex strings <...>
+//  4. Applying CMap translations to produce readable Unicode text
 func ExtractTextRaw(filePath string) ([]string, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -29,13 +30,18 @@ func ExtractTextRaw(filePath string) ([]string, error) {
 		return nil, nil
 	}
 
+	// Step 1: Find and parse all ToUnicode CMap tables
+	cmaps := FindCMaps(data)
+	var cmap *CMap
+	if len(cmaps) > 0 {
+		cmap = MergeCMaps(cmaps)
+	}
+
+	// Step 2: Extract text from content streams
 	var allText []string
 	for _, stream := range streams {
-		// Try to decompress (most PDF streams are FlateDecode/zlib)
 		decompressed := tryDecompress(stream)
-
-		// Extract text from the content stream
-		text := extractTextFromStream(decompressed)
+		text := extractTextFromStream(decompressed, cmap)
 		if text != "" {
 			allText = append(allText, text)
 		}
@@ -45,8 +51,6 @@ func ExtractTextRaw(filePath string) ([]string, error) {
 		return nil, nil
 	}
 
-	// Merge streams that belong to the same page
-	// (PDFs often have multiple streams per page)
 	merged := mergePageText(allText)
 	return merged, nil
 }
@@ -59,7 +63,6 @@ func extractStreams(data []byte) [][]byte {
 
 	offset := 0
 	for offset < len(data) {
-		// Find "stream" keyword
 		idx := bytes.Index(data[offset:], streamMarker)
 		if idx < 0 {
 			break
@@ -74,7 +77,6 @@ func extractStreams(data []byte) [][]byte {
 			start++
 		}
 
-		// Find "endstream"
 		endIdx := bytes.Index(data[start:], endMarker)
 		if endIdx < 0 {
 			break
@@ -104,68 +106,289 @@ func tryDecompress(data []byte) []byte {
 	return out
 }
 
-// PDF text operator patterns
+// Patterns for PDF text operators
 var (
-	// Matches text in parentheses for Tj operator: (text) Tj
-	tjPattern = regexp.MustCompile(`\(([^)]*)\)\s*Tj`)
-	// Matches text arrays for TJ operator: [(text) 123 (text)] TJ
+	// Matches hex strings for Tj: <hex> Tj
+	hexTjPattern = regexp.MustCompile(`<([0-9A-Fa-f]+)>\s*Tj`)
+	// Matches literal strings for Tj: (text) Tj
+	litTjPattern = regexp.MustCompile(`\(([^)]*)\)\s*Tj`)
+	// Matches TJ arrays: [...] TJ
 	tjArrayPattern = regexp.MustCompile(`\[([^\]]*)\]\s*TJ`)
-	// Matches individual strings within TJ arrays
-	tjArrayStringPattern = regexp.MustCompile(`\(([^)]*)\)`)
-	// Matches ' operator (move to next line and show text): (text) '
+	// Matches hex strings within TJ arrays
+	hexInArrayRe = regexp.MustCompile(`<([0-9A-Fa-f]+)>`)
+	// Matches literal strings within TJ arrays
+	litInArrayRe = regexp.MustCompile(`\(([^)]*)\)`)
+	// Matches ' operator
 	tickPattern = regexp.MustCompile(`\(([^)]*)\)\s*'`)
+	// Matches Td/TD operators for line detection (text positioning)
+	tdPattern = regexp.MustCompile(`([\d.\-]+)\s+([\d.\-]+)\s+T[dD]`)
 )
 
-// extractTextFromStream parses PDF content stream and extracts text.
-func extractTextFromStream(data []byte) string {
+// extractTextFromStream parses a PDF content stream and extracts text.
+func extractTextFromStream(data []byte, cmap *CMap) string {
 	content := string(data)
 
-	// Check if this looks like a content stream with text operators
+	// Check if this is a content stream with text operators
 	if !strings.Contains(content, "Tj") && !strings.Contains(content, "TJ") &&
 		!strings.Contains(content, "BT") {
 		return ""
 	}
 
-	var parts []string
+	// Process the stream sequentially to preserve text order and detect line breaks
+	// We walk through BT...ET blocks and track text position operators
+	var lines []string
+	var currentLine strings.Builder
 
-	// Extract Tj strings
-	for _, m := range tjPattern.FindAllStringSubmatch(content, -1) {
-		text := decodePDFString(m[1])
+	// Split into BT...ET text blocks
+	btBlocks := splitBTBlocks(content)
+	for _, block := range btBlocks {
+		blockLines := processTextBlock(block, cmap)
+		lines = append(lines, blockLines...)
+	}
+
+	// If no BT blocks found, try global extraction
+	if len(lines) == 0 {
+		text := extractAllText(content, cmap)
 		if text != "" {
-			parts = append(parts, text)
+			lines = append(lines, text)
 		}
 	}
 
-	// Extract TJ array strings
-	for _, m := range tjArrayPattern.FindAllStringSubmatch(content, -1) {
-		arrayContent := m[1]
-		for _, sm := range tjArrayStringPattern.FindAllStringSubmatch(arrayContent, -1) {
-			text := decodePDFString(sm[1])
-			if text != "" {
-				parts = append(parts, text)
+	_ = currentLine // used in processTextBlock
+	result := strings.Join(lines, "\n")
+	return strings.TrimSpace(result)
+}
+
+// splitBTBlocks extracts content between BT and ET operators.
+func splitBTBlocks(content string) []string {
+	var blocks []string
+	remaining := content
+	for {
+		btIdx := strings.Index(remaining, "BT")
+		if btIdx < 0 {
+			break
+		}
+		etIdx := strings.Index(remaining[btIdx:], "ET")
+		if etIdx < 0 {
+			break
+		}
+		block := remaining[btIdx : btIdx+etIdx+2]
+		blocks = append(blocks, block)
+		remaining = remaining[btIdx+etIdx+2:]
+	}
+	return blocks
+}
+
+// processTextBlock extracts lines of text from a BT...ET block.
+func processTextBlock(block string, cmap *CMap) []string {
+	var lines []string
+	var currentLine strings.Builder
+
+	// Process line by line within the block
+	ops := strings.Split(block, "\n")
+	for _, op := range ops {
+		op = strings.TrimSpace(op)
+
+		// Check for text positioning that implies a new line
+		// Td/TD with negative Y offset means new line
+		if tdPattern.MatchString(op) {
+			if currentLine.Len() > 0 {
+				line := strings.TrimSpace(currentLine.String())
+				if line != "" {
+					lines = append(lines, line)
+				}
+				currentLine.Reset()
 			}
 		}
+
+		// T* operator means new line
+		if op == "T*" {
+			if currentLine.Len() > 0 {
+				line := strings.TrimSpace(currentLine.String())
+				if line != "" {
+					lines = append(lines, line)
+				}
+				currentLine.Reset()
+			}
+		}
+
+		// Extract text from Tj with hex strings
+		for _, m := range hexTjPattern.FindAllStringSubmatch(op, -1) {
+			text := decodeHexString(m[1], cmap)
+			currentLine.WriteString(text)
+		}
+
+		// Extract text from Tj with literal strings
+		for _, m := range litTjPattern.FindAllStringSubmatch(op, -1) {
+			text := decodeLiteralString(m[1], cmap)
+			currentLine.WriteString(text)
+		}
+
+		// Extract text from TJ arrays
+		for _, m := range tjArrayPattern.FindAllStringSubmatch(op, -1) {
+			text := decodeTJArray(m[1], cmap)
+			currentLine.WriteString(text)
+		}
+
+		// Extract text from ' operator
+		for _, m := range tickPattern.FindAllStringSubmatch(op, -1) {
+			if currentLine.Len() > 0 {
+				line := strings.TrimSpace(currentLine.String())
+				if line != "" {
+					lines = append(lines, line)
+				}
+				currentLine.Reset()
+			}
+			text := decodeLiteralString(m[1], cmap)
+			currentLine.WriteString(text)
+		}
 	}
 
-	// Extract ' operator strings
-	for _, m := range tickPattern.FindAllStringSubmatch(content, -1) {
-		text := decodePDFString(m[1])
+	if currentLine.Len() > 0 {
+		line := strings.TrimSpace(currentLine.String())
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+
+	return lines
+}
+
+// extractAllText extracts all text from content without BT/ET block structure.
+func extractAllText(content string, cmap *CMap) string {
+	var parts []string
+
+	for _, m := range hexTjPattern.FindAllStringSubmatch(content, -1) {
+		text := decodeHexString(m[1], cmap)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	for _, m := range litTjPattern.FindAllStringSubmatch(content, -1) {
+		text := decodeLiteralString(m[1], cmap)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	for _, m := range tjArrayPattern.FindAllStringSubmatch(content, -1) {
+		text := decodeTJArray(m[1], cmap)
 		if text != "" {
 			parts = append(parts, text)
 		}
 	}
 
-	if len(parts) == 0 {
+	return strings.Join(parts, " ")
+}
+
+// decodeHexString decodes a hex-encoded PDF string using CMap if available.
+func decodeHexString(hexStr string, cmap *CMap) string {
+	raw, err := hex.DecodeString(hexStr)
+	if err != nil {
 		return ""
 	}
 
-	// Join parts, using newline where there's a clear line break
-	result := strings.Join(parts, " ")
-	return result
+	// Try CMap decoding first
+	if cmap != nil && len(cmap.charMap) > 0 {
+		result := cmap.Decode(raw)
+		if result != "" {
+			return result
+		}
+	}
+
+	// Fallback: try as direct UTF-16BE
+	if len(raw)%2 == 0 && len(raw) >= 2 {
+		var result strings.Builder
+		for i := 0; i+1 < len(raw); i += 2 {
+			cp := rune(raw[i])<<8 | rune(raw[i+1])
+			if unicode.IsPrint(cp) || cp == ' ' {
+				result.WriteRune(cp)
+			}
+		}
+		if result.Len() > 0 {
+			return result.String()
+		}
+	}
+
+	// Last resort: treat as ASCII
+	return cleanString(string(raw))
 }
 
-// decodePDFString handles basic PDF string escapes.
-func decodePDFString(s string) string {
+// decodeLiteralString decodes a literal PDF string using CMap if available.
+func decodeLiteralString(s string, cmap *CMap) string {
+	decoded := decodePDFEscapes(s)
+
+	// Try CMap decoding
+	if cmap != nil && len(cmap.charMap) > 0 {
+		result := cmap.Decode([]byte(decoded))
+		if result != "" && isPrintable(result) {
+			return result
+		}
+	}
+
+	return cleanString(decoded)
+}
+
+// decodeTJArray decodes a TJ array, which contains a mix of strings and numbers.
+func decodeTJArray(arrayContent string, cmap *CMap) string {
+	var parts []string
+
+	// Extract hex strings
+	hexMatches := hexInArrayRe.FindAllStringSubmatchIndex(arrayContent, -1)
+	litMatches := litInArrayRe.FindAllStringSubmatchIndex(arrayContent, -1)
+
+	// Combine and sort by position
+	type match struct {
+		pos    int
+		isHex  bool
+		groups []string
+	}
+	var all []match
+
+	for _, idx := range hexMatches {
+		all = append(all, match{
+			pos:   idx[0],
+			isHex: true,
+			groups: []string{
+				arrayContent[idx[0]:idx[1]],
+				arrayContent[idx[2]:idx[3]],
+			},
+		})
+	}
+	for _, idx := range litMatches {
+		all = append(all, match{
+			pos:   idx[0],
+			isHex: false,
+			groups: []string{
+				arrayContent[idx[0]:idx[1]],
+				arrayContent[idx[2]:idx[3]],
+			},
+		})
+	}
+
+	// Sort by position
+	for i := 1; i < len(all); i++ {
+		for j := i; j > 0 && all[j].pos < all[j-1].pos; j-- {
+			all[j], all[j-1] = all[j-1], all[j]
+		}
+	}
+
+	for _, m := range all {
+		var text string
+		if m.isHex {
+			text = decodeHexString(m.groups[1], cmap)
+		} else {
+			text = decodeLiteralString(m.groups[1], cmap)
+		}
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+
+	return strings.Join(parts, "")
+}
+
+// decodePDFEscapes handles basic PDF string escape sequences.
+func decodePDFEscapes(s string) string {
 	var buf strings.Builder
 	i := 0
 	for i < len(s) {
@@ -189,14 +412,13 @@ func decodePDFString(s string) string {
 			case '\\':
 				buf.WriteByte('\\')
 			default:
-				// Octal escape: \ddd
 				if s[i] >= '0' && s[i] <= '7' {
 					val := int(s[i] - '0')
 					for j := 1; j < 3 && i+j < len(s) && s[i+j] >= '0' && s[i+j] <= '7'; j++ {
 						val = val*8 + int(s[i+j]-'0')
 						i++
 					}
-					if val > 0 && val < 256 {
+					if val >= 0 && val < 256 {
 						buf.WriteByte(byte(val))
 					}
 				} else {
@@ -208,21 +430,34 @@ func decodePDFString(s string) string {
 		}
 		i++
 	}
+	return buf.String()
+}
 
-	result := buf.String()
-	// Filter out non-printable characters but keep common ones
-	cleaned := strings.Map(func(r rune) rune {
+// cleanString removes non-printable characters.
+func cleanString(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
 		if unicode.IsPrint(r) || r == '\n' || r == '\r' || r == '\t' {
 			return r
 		}
 		return -1
-	}, result)
-	return strings.TrimSpace(cleaned)
+	}, s))
 }
 
-// mergePageText attempts to group extracted text into logical pages.
-// Content streams that produce short text are often metadata;
-// longer ones are actual page content.
+// isPrintable checks if a string contains mostly printable characters.
+func isPrintable(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	printable := 0
+	for _, r := range s {
+		if unicode.IsPrint(r) || r == '\n' || r == '\r' || r == '\t' || r == ' ' {
+			printable++
+		}
+	}
+	return float64(printable)/float64(len([]rune(s))) > 0.5
+}
+
+// mergePageText groups extracted text into logical pages.
 func mergePageText(texts []string) []string {
 	var pages []string
 	var current strings.Builder
@@ -232,9 +467,7 @@ func mergePageText(texts []string) []string {
 		if t == "" {
 			continue
 		}
-
-		// If this chunk has enough content to be a page section, include it
-		if len(t) > 20 {
+		if len(t) > 10 {
 			if current.Len() > 0 {
 				current.WriteString("\n")
 			}
@@ -246,7 +479,6 @@ func mergePageText(texts []string) []string {
 		pages = append(pages, current.String())
 	}
 
-	// If nothing passed the length filter, include everything
 	if len(pages) == 0 {
 		var all strings.Builder
 		for _, t := range texts {
