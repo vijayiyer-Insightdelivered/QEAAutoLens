@@ -3,10 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/insightdelivered/bank-statement-converter/internal/api"
 	"github.com/insightdelivered/bank-statement-converter/internal/extractor"
 	"github.com/insightdelivered/bank-statement-converter/internal/models"
 	"github.com/insightdelivered/bank-statement-converter/internal/parser"
@@ -22,6 +24,9 @@ func main() {
 	headerFlag := flag.Bool("header", true, "Include account metadata header rows in CSV")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	helpFlag := flag.Bool("help", false, "Show usage help")
+	serveFlag := flag.Bool("serve", false, "Start web UI server instead of CLI mode")
+	portFlag := flag.String("port", "8080", "Port for web UI server (used with --serve)")
+	staticFlag := flag.String("static", "", "Path to React build directory (used with --serve)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Bank Statement PDF to CSV Converter
@@ -32,6 +37,9 @@ into structured CSV files for analysis.
 
 Usage:
   bank-statement-converter [flags] <input.pdf> [input2.pdf ...]
+
+  Web UI mode:
+  bank-statement-converter --serve [--port=8080] [--static=./web/dist]
 
 Flags:
 `)
@@ -50,6 +58,9 @@ Examples:
   # Convert multiple files
   bank-statement-converter --bank=barclays jan.pdf feb.pdf mar.pdf
 
+  # Start web UI
+  bank-statement-converter --serve --port=3001
+
 Supported Banks:
   metro     - Metro Bank (DD/MM/YYYY format)
   hsbc      - HSBC UK (DD Mon YY format)
@@ -62,6 +73,12 @@ Supported Banks:
 	if *versionFlag {
 		fmt.Printf("bank-statement-converter v%s\n", version)
 		os.Exit(0)
+	}
+
+	// Web server mode
+	if *serveFlag {
+		startServer(*portFlag, *staticFlag)
+		return
 	}
 
 	if *helpFlag || flag.NArg() == 0 {
@@ -92,6 +109,27 @@ Supported Banks:
 			fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", inputPath, err)
 			os.Exit(1)
 		}
+	}
+}
+
+func startServer(port, staticDir string) {
+	mux := http.NewServeMux()
+
+	h := &api.Handler{StaticDir: staticDir}
+	h.RegisterRoutes(mux)
+
+	addr := ":" + port
+	fmt.Printf("Bank Statement Converter - Web UI\n")
+	fmt.Printf("Server starting on http://localhost%s\n", addr)
+	if staticDir != "" {
+		fmt.Printf("Serving UI from: %s\n", staticDir)
+	} else {
+		fmt.Printf("API-only mode (no --static dir specified)\n")
+		fmt.Printf("Run React dev server separately: cd web && npm run dev\n")
+	}
+
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		fatalf("Server error: %v\n", err)
 	}
 }
 
@@ -154,9 +192,6 @@ func processFile(inputPath string, bankType models.BankType, outputPath string, 
 		base := strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
 		outPath = base + ".csv"
 	}
-
-	// If multiple files and no explicit output, use per-file naming
-	// (outputPath will only be used for the first file if multiple are given)
 
 	// Write CSV
 	w := &writer.CSVWriter{IncludeHeader: includeHeader}
