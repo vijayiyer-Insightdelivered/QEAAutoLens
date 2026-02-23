@@ -14,6 +14,8 @@ var (
 	datePatternText = regexp.MustCompile(`\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\b`)
 	// DD-Mon-YYYY or DD-Mon-YY
 	datePatternDash = regexp.MustCompile(`\b(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*-\d{2,4})\b`)
+	// DD Mon without year (e.g., "4 Dec", "15 Jan") — used by Barclays business statements
+	datePatternShort = regexp.MustCompile(`^(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))(?:\s|→|$)`)
 )
 
 // parseAmount converts a string like "1,234.56" or "-£1,234.56" to a float64.
@@ -81,6 +83,20 @@ func extractDate(line string) string {
 		if loc != nil && loc[0] < 3 {
 			return m
 		}
+	}
+	return ""
+}
+
+// startsWithShortDate checks if a line starts with "D Mon" format (no year).
+func startsWithShortDate(line string) bool {
+	return datePatternShort.MatchString(strings.TrimSpace(line))
+}
+
+// extractShortDate returns the "D Mon" date from the start of a line, or "".
+func extractShortDate(line string) string {
+	m := datePatternShort.FindStringSubmatch(strings.TrimSpace(line))
+	if m != nil {
+		return m[1]
 	}
 	return ""
 }
