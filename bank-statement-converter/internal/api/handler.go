@@ -130,11 +130,16 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		// FormData values (per the HTML spec), but the page separator uses \n.
 		extractedText = strings.ReplaceAll(extractedText, "\r\n", "\n")
 		// Use the client-side extracted text (split by page separator)
+		var candidatePages []string
 		for _, page := range strings.Split(extractedText, "\n---PAGE_BREAK---\n") {
 			page = strings.TrimSpace(page)
 			if page != "" {
-				pages = append(pages, page)
+				candidatePages = append(candidatePages, page)
 			}
+		}
+		// Only use client-side text if it's readable (not garbage)
+		if extractor.IsReadableText(candidatePages) {
+			pages = candidatePages
 		}
 	}
 
