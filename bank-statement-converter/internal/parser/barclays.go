@@ -9,7 +9,7 @@ import (
 
 // BarclaysParser handles Barclays bank statement PDFs.
 //
-// Barclays statements come in two main formats:
+// Barclays statements come in three formats:
 //
 // Format A (standard): Date | Description | Money out | Money in | Balance
 //
@@ -19,6 +19,12 @@ import (
 // Format B (business, arrow-separated): uses → as column separator and short dates "D Mon"
 //
 //	Example: "5 Dec → Direct Debit to Stripe → 58.80 → 9,397.88"
+//
+// Format C (business, no arrows): short dates "D Mon" shared across transactions
+//
+//	Dates appear once per date group; subsequent transactions inherit the date.
+//	Example: "4 Dec Start Balance 9,856.68"
+//	         "On-Line Banking Bill Payment to 400.00 9,456.68"
 type BarclaysParser struct{}
 
 func (p *BarclaysParser) BankName() string {
@@ -64,8 +70,13 @@ func (p *BarclaysParser) Parse(pages []string) (*models.StatementInfo, error) {
 	info.AccountHolder = extractBarclaysName(allText)
 	info.StatementPeriod = extractPeriod(allText)
 
-	// Detect if this is an arrow-separated format
+	// Detect which format variant this statement uses:
+	//   1. Arrow-separated (→): Barclays business statements with → column separators
+	//   2. Shared-date (DD Mon, no arrows): Business statements extracted as plain text
+	//      where dates appear once per group and apply to subsequent transactions
+	//   3. Standard (DD/MM/YYYY or DD Mon YYYY): Personal Barclays statements
 	arrowFormat := strings.Contains(allText, "→")
+	sharedDateFormat := !arrowFormat && hasShortDatesOnly(allText)
 
 	for _, page := range pages {
 		lines := strings.Split(page, "\n")
@@ -73,7 +84,12 @@ func (p *BarclaysParser) Parse(pages []string) (*models.StatementInfo, error) {
 		if arrowFormat {
 			var openBal float64
 			txns, openBal = p.parseLinesArrow(lines)
-			// Keep the first non-zero opening balance we find
+			if info.OpeningBalance == 0 && openBal != 0 {
+				info.OpeningBalance = openBal
+			}
+		} else if sharedDateFormat {
+			var openBal float64
+			txns, openBal = p.parseLinesSharedDate(lines)
 			if info.OpeningBalance == 0 && openBal != 0 {
 				info.OpeningBalance = openBal
 			}
@@ -124,19 +140,35 @@ func (p *BarclaysParser) parseLinesArrow(lines []string) ([]models.Transaction, 
 			continue
 		}
 
-		// Handle balance summary lines: extract date and opening balance, then skip
+		// Balance lines (Start Balance, Balance brought forward, etc.):
+		// extract date and opening balance, then emit as a BALANCE transaction
+		// so the line appears in output.
 		if isBalanceLine(line) {
-			// Extract date from balance line so subsequent dateless transactions
-			// inherit the correct date
 			if sd := extractShortDate(line); sd != "" {
 				currentDate = sd
 				inTransactionSection = true
 			}
-			// Extract opening balance amount (from "Start Balance" or "Balance brought forward")
+			// Extract opening balance amount
 			if isOpeningBalanceLine(line) && openingBalance == 0 {
 				if amounts := amountPattern.FindAllString(line, -1); len(amounts) > 0 {
 					if bal, err := parseAmount(amounts[len(amounts)-1]); err == nil {
 						openingBalance = bal
+					}
+				}
+			}
+			// Emit as a BALANCE transaction
+			balDesc := extractBalanceDescription(line)
+			if balDesc != "" {
+				if amounts := amountPattern.FindAllString(line, -1); len(amounts) > 0 {
+					bal, err := parseAmount(amounts[len(amounts)-1])
+					if err == nil {
+						transactions = append(transactions, models.Transaction{
+							Date:        currentDate,
+							Description: balDesc,
+							Type:        "BALANCE",
+							Amount:      0,
+							Balance:     bal,
+						})
 					}
 				}
 			}
@@ -455,6 +487,191 @@ func isBarclaysSkipLine(line string) bool {
 	for _, phrase := range skipPhrases {
 		if strings.Contains(lower, phrase) {
 			return true
+		}
+	}
+	return false
+}
+
+// extractBalanceDescription returns a clean description for a balance line,
+// stripping the date prefix, arrows, and amounts.
+func extractBalanceDescription(line string) string {
+	// Remove arrows
+	clean := strings.ReplaceAll(line, "→", " ")
+	// Remove date prefix
+	if sd := extractShortDate(clean); sd != "" {
+		idx := strings.Index(clean, sd)
+		if idx >= 0 {
+			clean = clean[idx+len(sd):]
+		}
+	}
+	// Remove amounts
+	clean = amountPattern.ReplaceAllString(clean, "")
+	return cleanDescription(clean)
+}
+
+// --- Format C (business, no arrows, shared dates) ---
+//
+// Handles Barclays business statements extracted without → separators.
+// Dates are "DD Mon" (no year) and appear once per date group — subsequent
+// transactions under the same date have no date prefix.
+
+func (p *BarclaysParser) parseLinesSharedDate(lines []string) ([]models.Transaction, float64) {
+	var transactions []models.Transaction
+	var openingBalance float64
+	inTransactionSection := false
+	currentDate := ""
+
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+
+		if containsBarclaysHeader(line) {
+			inTransactionSection = true
+			continue
+		}
+
+		if isBarclaysFooter(line) || isBarclaysSkipLine(line) {
+			continue
+		}
+
+		if isSummaryLine(line) {
+			continue
+		}
+
+		if isBarclaysFXDetailLine(line) {
+			if len(transactions) > 0 {
+				last := &transactions[len(transactions)-1]
+				last.Description += " " + line
+			}
+			continue
+		}
+
+		// Check for short date at start
+		shortDate := extractShortDate(line)
+		if shortDate != "" {
+			currentDate = shortDate
+			inTransactionSection = true
+		}
+
+		// Also check for full date formats
+		if shortDate == "" && startsWithDate(line) {
+			currentDate = extractDate(line)
+			inTransactionSection = true
+		}
+
+		if !inTransactionSection {
+			continue
+		}
+
+		// Try to parse as a transaction (line has trailing amounts)
+		txn := p.parseSharedDateTransactionLine(line, shortDate, currentDate)
+		if txn != nil {
+			// Capture opening balance
+			if txn.Type == "BALANCE" && isOpeningBalanceLine(txn.Description) && openingBalance == 0 {
+				openingBalance = txn.Balance
+			}
+			transactions = append(transactions, *txn)
+			continue
+		}
+
+		// No amounts found — continuation line
+		if len(transactions) > 0 {
+			cleanLine := line
+			if shortDate != "" {
+				cleanLine = strings.TrimSpace(strings.TrimPrefix(cleanLine, shortDate))
+			}
+			if cleanLine != "" && !isBarclaysFooter(cleanLine) {
+				last := &transactions[len(transactions)-1]
+				last.Description += " " + cleanLine
+			}
+		}
+	}
+
+	return transactions, openingBalance
+}
+
+// parseSharedDateTransactionLine parses a space/tab-separated line as a
+// transaction.  Returns nil if the line has no monetary amounts.
+func (p *BarclaysParser) parseSharedDateTransactionLine(line, shortDate, currentDate string) *models.Transaction {
+	rest := line
+	if shortDate != "" {
+		idx := strings.Index(rest, shortDate)
+		if idx >= 0 {
+			rest = strings.TrimSpace(rest[idx+len(shortDate):])
+		}
+	}
+
+	if rest == "" {
+		return nil
+	}
+
+	allLocs := amountPattern.FindAllStringIndex(rest, -1)
+	if len(allLocs) == 0 {
+		return nil
+	}
+
+	desc := strings.TrimSpace(rest[:allLocs[0][0]])
+	if desc == "" {
+		return nil
+	}
+
+	var amounts []float64
+	for _, loc := range allLocs {
+		a, err := parseAmount(rest[loc[0]:loc[1]])
+		if err == nil {
+			amounts = append(amounts, a)
+		}
+	}
+
+	if len(amounts) == 0 {
+		return nil
+	}
+
+	txn := &models.Transaction{
+		Date:        currentDate,
+		Description: cleanDescription(desc),
+	}
+
+	if isBalanceLine(desc) {
+		txn.Balance = amounts[len(amounts)-1]
+		txn.Amount = 0
+		txn.Type = "BALANCE"
+		return txn
+	}
+
+	if len(amounts) >= 2 {
+		txn.Amount = amounts[0]
+		txn.Balance = amounts[len(amounts)-1]
+	} else {
+		txn.Amount = amounts[0]
+	}
+
+	if isDebitDescription(desc) {
+		txn.Type = "DEBIT"
+	} else if isCreditDescription(desc) {
+		txn.Type = "CREDIT"
+	} else {
+		txn.Type = "DEBIT"
+	}
+
+	return txn
+}
+
+// hasShortDatesOnly detects the shared-date business format by checking
+// whether at least 2 lines start with "DD Mon" (no year).  Lines that also
+// match "DD Mon YYYY" are excluded so Format A statements are not misidentified.
+func hasShortDatesOnly(text string) bool {
+	lines := strings.Split(text, "\n")
+	count := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if extractShortDate(line) != "" && !datePatternText.MatchString(line) {
+			count++
+			if count >= 2 {
+				return true
+			}
 		}
 	}
 	return false

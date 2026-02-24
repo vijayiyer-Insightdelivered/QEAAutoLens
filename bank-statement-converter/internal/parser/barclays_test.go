@@ -119,12 +119,27 @@ Ref: Antalis Limited`,
 			i, txn.Date, txn.Description, txn.Type, txn.Amount, txn.Balance)
 	}
 
-	if len(info.Transactions) < 4 {
-		t.Fatalf("expected at least 4 transactions, got %d", len(info.Transactions))
+	if len(info.Transactions) < 5 {
+		t.Fatalf("expected at least 5 transactions (including Start Balance), got %d", len(info.Transactions))
 	}
 
-	// Verify the first transaction has the correct date from the "Start Balance" line
+	// Verify Start Balance is emitted as a BALANCE transaction
 	found := false
+	for _, txn := range info.Transactions {
+		if txn.Type == "BALANCE" && txn.Balance == 9856.68 {
+			found = true
+			if txn.Date != "4 Dec" {
+				t.Errorf("Start Balance date: got %q, want %q", txn.Date, "4 Dec")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find Start Balance transaction with balance 9,856.68")
+	}
+
+	// Verify the bill payment has the correct date from the "Start Balance" line
+	found = false
 	for _, txn := range info.Transactions {
 		if txn.Amount == 400.00 && txn.Type == "DEBIT" {
 			found = true
@@ -319,5 +334,131 @@ Total Payments/Receipts → 27,129.56 21,000.00`,
 	}
 	if !found {
 		t.Error("expected to find DigitalOcean payment of 53.11")
+	}
+}
+
+func TestBarclaysParser_SharedDateFormat(t *testing.T) {
+	p := &BarclaysParser{}
+
+	// Barclays business statement extracted without → arrows.
+	// Dates are DD Mon (no year) and shared across multiple transactions.
+	pages := []string{
+		`INSIGHT DELIVERED LIMITED Sort Code 20-71-03 Account No 90950467
+Issued on 05 January 2026
+Date Description Money out Money in Balance
+4 Dec Start Balance 9,856.68
+On-Line Banking Bill Payment to Mads Rose Trading 400.00 9,456.68
+Ref: Inv 1
+5 Dec Direct Debit to Stripe 58.80 9,397.88
+Ref: 7Trknzzm-SL
+Direct Credit From Antalis Limited 800.00 10,197.88
+8 Dec Direct Debit to Sage UK Ltd 84.00 10,113.88
+On-Line Banking Bill Payment to UK Insurance 400.00 9,713.88
+Direct Credit From Antalis Limited 10,500.00 20,213.88
+9 Dec Card Payment Amazon 14.99 20,198.89`,
+	}
+
+	info, err := p.Parse(pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	t.Logf("parsed %d transactions (shared-date format)", len(info.Transactions))
+	for i, txn := range info.Transactions {
+		t.Logf("  [%d] date=%q desc=%q type=%s amount=%.2f balance=%.2f",
+			i, txn.Date, txn.Description, txn.Type, txn.Amount, txn.Balance)
+	}
+
+	// Should parse at least 8 transactions (including Start Balance)
+	if len(info.Transactions) < 8 {
+		t.Fatalf("expected at least 8 transactions, got %d", len(info.Transactions))
+	}
+
+	// Verify OpeningBalance is captured
+	if info.OpeningBalance != 9856.68 {
+		t.Errorf("opening balance: got %.2f, want 9856.68", info.OpeningBalance)
+	}
+
+	// Verify Start Balance transaction
+	found := false
+	for _, txn := range info.Transactions {
+		if txn.Type == "BALANCE" && txn.Balance == 9856.68 {
+			found = true
+			if txn.Date != "4 Dec" {
+				t.Errorf("Start Balance date: got %q, want %q", txn.Date, "4 Dec")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find Start Balance with balance 9,856.68")
+	}
+
+	// Verify bill payment on same date as Start Balance (shared date "4 Dec")
+	found = false
+	for _, txn := range info.Transactions {
+		if txn.Amount == 400.00 && txn.Date == "4 Dec" && txn.Type == "DEBIT" {
+			found = true
+			if txn.Balance != 9456.68 {
+				t.Errorf("Mads Rose balance: got %.2f, want 9456.68", txn.Balance)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected bill payment of 400.00 on 4 Dec (shared date)")
+	}
+
+	// Verify transaction under "5 Dec" with no date prefix (inherited date)
+	found = false
+	for _, txn := range info.Transactions {
+		if txn.Amount == 800.00 && txn.Type == "CREDIT" {
+			found = true
+			if txn.Date != "5 Dec" {
+				t.Errorf("Antalis 800.00 credit date: got %q, want %q", txn.Date, "5 Dec")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected Direct Credit of 800.00 under shared date 5 Dec")
+	}
+
+	// Verify "8 Dec" has 3 transactions
+	count8Dec := 0
+	for _, txn := range info.Transactions {
+		if txn.Date == "8 Dec" && txn.Type != "BALANCE" {
+			count8Dec++
+		}
+	}
+	if count8Dec != 3 {
+		t.Errorf("expected 3 transactions on 8 Dec, got %d", count8Dec)
+	}
+
+	// Verify Antalis credit on 8 Dec
+	found = false
+	for _, txn := range info.Transactions {
+		if txn.Amount == 10500.00 && txn.Type == "CREDIT" && txn.Date == "8 Dec" {
+			found = true
+			if txn.Balance != 20213.88 {
+				t.Errorf("Antalis 10,500 balance: got %.2f, want 20213.88", txn.Balance)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected Antalis credit of 10,500.00 on 8 Dec")
+	}
+
+	// Verify 9 Dec transaction
+	found = false
+	for _, txn := range info.Transactions {
+		if txn.Amount == 14.99 && txn.Date == "9 Dec" && txn.Type == "DEBIT" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected Card Payment Amazon of 14.99 on 9 Dec")
 	}
 }
