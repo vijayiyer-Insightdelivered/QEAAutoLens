@@ -126,6 +126,9 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 	var pages []string
 
 	if extractedText != "" {
+		// Normalize CRLF to LF — browsers convert \n to \r\n when encoding
+		// FormData values (per the HTML spec), but the page separator uses \n.
+		extractedText = strings.ReplaceAll(extractedText, "\r\n", "\n")
 		// Use the client-side extracted text (split by page separator)
 		for _, page := range strings.Split(extractedText, "\n---PAGE_BREAK---\n") {
 			page = strings.TrimSpace(page)
