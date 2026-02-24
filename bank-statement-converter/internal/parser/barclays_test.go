@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -66,7 +67,9 @@ Date Description Money out Money in Balance
 func TestBarclaysParser_ArrowFormat(t *testing.T) {
 	p := &BarclaysParser{}
 
-	// Realistic Barclays business statement with → separators and short dates
+	// Realistic Barclays business statement with → separators, short dates,
+	// and interleaved sidebar "At a glance" summary items (Money out, Money in,
+	// Start balance, End balance, etc.) that must NOT be parsed as transactions.
 	pages := []string{
 		`INSIGHT DELIVERED LIMITED Sort Code 20-71-03 Account No 90950467
 SWIFTBIC BUKBGB22 IBAN GB29 BUKB 2071 0390 9504 67
@@ -80,12 +83,16 @@ Your Business Current Account → At a glance
 Date Description → Money out £ Money in £ → Balance £
 2026
 4 Dec Start Balance → 9,856.68
+Start balance → £9,856.68
 On-Line Banking Bill Payment to → 400.00 → 9,456.68
+Money out → £27,129.56
 Mads Rose Trading
 Ref: Inv 1
 5 Dec → Direct Debit to Stripe → 58.80 → 9,397.88
 Ref: 7Trknzzm-SL
+Money in → £21,000.00
 Commission Charges For The → 8.50 → 9,389.38
+End balance → £3,727.12
 Period 13 Oct /12 Nov
 8 Dec → On-Line Banking Bill Payment to → 140.00 → 9,249.38
 Sasha Mitchell
@@ -184,6 +191,17 @@ Ref: Antalis Limited`,
 	}
 	if !found {
 		t.Error("expected to find Antalis credit of 10,500.00")
+	}
+
+	// Verify sidebar "At a glance" items are NOT parsed as transactions
+	for _, txn := range info.Transactions {
+		lower := strings.ToLower(txn.Description)
+		if strings.HasPrefix(lower, "money out") {
+			t.Errorf("sidebar 'Money out' should not be a transaction: %+v", txn)
+		}
+		if strings.HasPrefix(lower, "money in") {
+			t.Errorf("sidebar 'Money in' should not be a transaction: %+v", txn)
+		}
 	}
 }
 
@@ -298,7 +316,9 @@ Ref: Inv 2484`,
 func TestBarclaysParser_ArrowFormat_Page3(t *testing.T) {
 	p := &BarclaysParser{}
 
-	// Page 3 with foreign currency transaction and final balance
+	// Page 3 with foreign currency transaction, final balance, and trailing boilerplate.
+	// The boilerplate text after "Balance carried forward" must NOT be appended
+	// to its description.
 	pages := []string{
 		`Insight Delivered Limited • Sort Code 20-71-03 • Account No 90950467
 Date Description → Money out £ → Money in £ → Balance £
@@ -307,7 +327,10 @@ BalanceBalance brought forward from previous pagebrought forward from previous p
 Digitalocean.Com USD 69.26 On 01 Jan at VISA Exchange Rate 1.34
 The Final GBP Amount Includes A Non-Sterling Transaction Fee of £ 1.42
 2 Jan Balance carried forward → 3,727.12
-Total Payments/Receipts → 27,129.56 21,000.00`,
+Total Payments/Receipts → 27,129.56 21,000.00
+Anything wrong? If you notice any incorrect or unusual transactions, see the next page for how to get in touch with us.
+Barclays Bank UK PLC. Authorised by the Prudential Regulation Authority and regulated by the Financial Conduct Authority and the Prudential Regulation Authority (Financial Services Register No. 759676).
+Registered in England. Registered No. 9740322. Registered Office: 1 Churchill Place, London E14 5HP.`,
 	}
 
 	info, err := p.Parse(pages)
@@ -334,6 +357,27 @@ Total Payments/Receipts → 27,129.56 21,000.00`,
 	}
 	if !found {
 		t.Error("expected to find DigitalOcean payment of 53.11")
+	}
+
+	// Verify "Balance carried forward" description stays clean (no trailing boilerplate).
+	// Before this fix, boilerplate text ("Anything wrong?", "Barclays Bank UK PLC", etc.)
+	// was appended to its description.
+	found = false
+	for _, txn := range info.Transactions {
+		if txn.Type == "BALANCE" && strings.Contains(strings.ToLower(txn.Description), "balance carried forward") {
+			found = true
+			if txn.Description != "Balance carried forward" {
+				t.Errorf("Balance carried forward has trailing text: got %q, want %q",
+					txn.Description, "Balance carried forward")
+			}
+			if txn.Balance != 3727.12 {
+				t.Errorf("Balance carried forward balance: got %.2f, want 3727.12", txn.Balance)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find Balance carried forward transaction")
 	}
 }
 

@@ -220,12 +220,17 @@ func (p *BarclaysParser) parseLinesArrow(lines []string) ([]models.Transaction, 
 		// Determine if this is a real transaction line (has amounts in column positions)
 		// versus a continuation/detail line that happens to contain numbers
 		if !isBarclaysTransactionLine(parts) {
-			// No amounts in expected column positions — continuation line
+			// No amounts in expected column positions — continuation line.
+			// Never append to BALANCE transactions — their descriptions are
+			// always single-line ("Start Balance", "Balance carried forward").
 			if len(transactions) > 0 {
+				last := &transactions[len(transactions)-1]
+				if last.Type == "BALANCE" {
+					continue
+				}
 				cleanLine := strings.ReplaceAll(line, "→", "")
 				cleanLine = strings.TrimSpace(cleanLine)
 				if cleanLine != "" && !isBarclaysFooter(cleanLine) {
-					last := &transactions[len(transactions)-1]
 					last.Description += " " + cleanLine
 				}
 			}
@@ -483,6 +488,9 @@ func isBarclaysSkipLine(line string) bool {
 		"swiftbic",
 		"iban gb",
 		"anything wrong",
+		"money out",   // sidebar "At a glance" summary
+		"money in",    // sidebar "At a glance" summary
+		"interest paid", // sidebar info
 	}
 	for _, phrase := range skipPhrases {
 		if strings.Contains(lower, phrase) {
@@ -576,14 +584,19 @@ func (p *BarclaysParser) parseLinesSharedDate(lines []string) ([]models.Transact
 			continue
 		}
 
-		// No amounts found — continuation line
+		// No amounts found — continuation line.
+		// Never append to BALANCE transactions — their descriptions are
+		// always single-line ("Start Balance", "Balance carried forward").
 		if len(transactions) > 0 {
+			last := &transactions[len(transactions)-1]
+			if last.Type == "BALANCE" {
+				continue
+			}
 			cleanLine := line
 			if shortDate != "" {
 				cleanLine = strings.TrimSpace(strings.TrimPrefix(cleanLine, shortDate))
 			}
 			if cleanLine != "" && !isBarclaysFooter(cleanLine) {
-				last := &transactions[len(transactions)-1]
 				last.Description += " " + cleanLine
 			}
 		}
