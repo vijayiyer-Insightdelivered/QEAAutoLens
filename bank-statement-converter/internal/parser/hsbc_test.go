@@ -179,6 +179,58 @@ func TestHSBCParser_RealHSBCFormat(t *testing.T) {
 	}
 }
 
+// Test the EXACT real-world scenario: interest line split across two PDF lines
+func TestHSBCParser_SplitLineJoin(t *testing.T) {
+	p := &HSBCParser{}
+
+	// Exact lines from the debug output:
+	// Line 30: "30 Jan 26\tCR GROSS INTEREST" (date + partial desc, NO amounts)
+	// Line 31: "TO 29JAN2026\t6.07\t5,113.94" (rest of desc + amounts, NO date)
+	pages := []string{
+		"Date\tPayment type and details\tPaid out\tPaid in\tBalance\n" +
+			"30 Dec 25\tBALANCE BROUGHT FORWARD\t.\t5,107.87\n" +
+			"30 Jan 26\tCR GROSS INTEREST\n" +
+			"TO 29JAN2026\t6.07\t5,113.94\n" +
+			"30 Jan 26\tBALANCE CARRIED FORWARD\t5,113.94",
+	}
+
+	info, err := p.Parse(pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	t.Logf("parsed %d transactions", len(info.Transactions))
+	for i, txn := range info.Transactions {
+		t.Logf("  [%d] %s | %q | %s | %.2f | %.2f | method=%s",
+			i, txn.Date, txn.Description, txn.Type, txn.Amount, txn.Balance, txn.ParseMethod)
+	}
+
+	if len(info.Transactions) != 3 {
+		t.Fatalf("expected 3 transactions, got %d", len(info.Transactions))
+	}
+
+	// Verify the joined interest transaction
+	interest := info.Transactions[1]
+	if !strings.Contains(interest.Description, "INTEREST") {
+		t.Errorf("expected interest transaction at index 1, got %q", interest.Description)
+	}
+	if interest.Amount != 6.07 {
+		t.Errorf("interest amount: got %.2f, want 6.07", interest.Amount)
+	}
+	if interest.Balance != 5113.94 {
+		t.Errorf("interest balance: got %.2f, want 5113.94", interest.Balance)
+	}
+	if interest.ParseMethod != "tab-separated-joined" {
+		t.Errorf("expected parse method 'tab-separated-joined', got %q", interest.ParseMethod)
+	}
+
+	// Verify BALANCE BROUGHT FORWARD was NOT polluted with continuation text
+	bf := info.Transactions[0]
+	if strings.Contains(bf.Description, "29JAN") || strings.Contains(bf.Description, "6.07") {
+		t.Errorf("BALANCE BROUGHT FORWARD has leaked continuation: %q", bf.Description)
+	}
+}
+
 func TestHSBCParser_SlashDates(t *testing.T) {
 	p := &HSBCParser{}
 

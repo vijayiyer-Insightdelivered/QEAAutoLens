@@ -168,7 +168,8 @@ func isSummaryLine(line string) bool {
 	lower := strings.ToLower(line)
 	summaryKeywords := []string{
 		"opening balance", "closing balance", "total paid in",
-		"total paid out", "statement period", "page ", "continued",
+		"total paid out", "total payments", "total receipts",
+		"statement period", "page ", "continued",
 	}
 	for _, kw := range summaryKeywords {
 		if strings.Contains(lower, kw) {
