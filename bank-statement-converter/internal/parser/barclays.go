@@ -71,7 +71,12 @@ func (p *BarclaysParser) Parse(pages []string) (*models.StatementInfo, error) {
 		lines := strings.Split(page, "\n")
 		var txns []models.Transaction
 		if arrowFormat {
-			txns = p.parseLinesArrow(lines)
+			var openBal float64
+			txns, openBal = p.parseLinesArrow(lines)
+			// Keep the first non-zero opening balance we find
+			if info.OpeningBalance == 0 && openBal != 0 {
+				info.OpeningBalance = openBal
+			}
 		} else {
 			txns = p.parseLines(lines)
 		}
@@ -91,8 +96,9 @@ func (p *BarclaysParser) Parse(pages []string) (*models.StatementInfo, error) {
 //	"5 Dec → Direct Debit to Stripe → 58.80 → 9,397.88"
 //	"Direct Credit From Antalis Limited → 10,500.00 19,749.38"
 //	"Ref: Antalis Limited" (continuation)
-func (p *BarclaysParser) parseLinesArrow(lines []string) []models.Transaction {
+func (p *BarclaysParser) parseLinesArrow(lines []string) ([]models.Transaction, float64) {
 	var transactions []models.Transaction
+	var openingBalance float64
 	inTransactionSection := false
 	currentDate := ""
 
@@ -118,8 +124,22 @@ func (p *BarclaysParser) parseLinesArrow(lines []string) []models.Transaction {
 			continue
 		}
 
-		// Skip balance summary lines
+		// Handle balance summary lines: extract date and opening balance, then skip
 		if isBalanceLine(line) {
+			// Extract date from balance line so subsequent dateless transactions
+			// inherit the correct date
+			if sd := extractShortDate(line); sd != "" {
+				currentDate = sd
+				inTransactionSection = true
+			}
+			// Extract opening balance amount (from "Start Balance" or "Balance brought forward")
+			if isOpeningBalanceLine(line) && openingBalance == 0 {
+				if amounts := amountPattern.FindAllString(line, -1); len(amounts) > 0 {
+					if bal, err := parseAmount(amounts[len(amounts)-1]); err == nil {
+						openingBalance = bal
+					}
+				}
+			}
 			continue
 		}
 
@@ -187,7 +207,15 @@ func (p *BarclaysParser) parseLinesArrow(lines []string) []models.Transaction {
 		}
 	}
 
-	return transactions
+	return transactions, openingBalance
+}
+
+// isOpeningBalanceLine checks if a balance line represents the opening balance
+// (as opposed to "balance carried forward" or "end balance").
+func isOpeningBalanceLine(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.Contains(lower, "start balance") ||
+		strings.Contains(lower, "balance brought forward")
 }
 
 // isBarclaysTransactionLine determines if arrow-separated parts represent a real transaction.

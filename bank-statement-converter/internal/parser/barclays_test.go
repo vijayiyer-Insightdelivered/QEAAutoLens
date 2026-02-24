@@ -107,6 +107,12 @@ Ref: Antalis Limited`,
 		t.Errorf("account number: got %q, want %q", info.AccountNumber, "90950467")
 	}
 
+	// Verify opening balance is captured
+	if info.OpeningBalance != 9856.68 {
+		t.Errorf("opening balance: got %.2f, want 9856.68", info.OpeningBalance)
+	}
+
+	t.Logf("opening balance: %.2f", info.OpeningBalance)
 	t.Logf("parsed %d transactions", len(info.Transactions))
 	for i, txn := range info.Transactions {
 		t.Logf("  [%d] date=%q desc=%q type=%s amount=%.2f balance=%.2f",
@@ -117,12 +123,14 @@ Ref: Antalis Limited`,
 		t.Fatalf("expected at least 4 transactions, got %d", len(info.Transactions))
 	}
 
-	// Verify specific transactions
-	// Transaction 1: Bill Payment to Mads Rose Trading (debit)
+	// Verify the first transaction has the correct date from the "Start Balance" line
 	found := false
 	for _, txn := range info.Transactions {
 		if txn.Amount == 400.00 && txn.Type == "DEBIT" {
 			found = true
+			if txn.Date != "4 Dec" {
+				t.Errorf("Mads Rose Trading txn date: got %q, want %q", txn.Date, "4 Dec")
+			}
 			if txn.Balance != 9456.68 {
 				t.Errorf("Mads Rose Trading txn balance: got %.2f, want 9456.68", txn.Balance)
 			}
@@ -230,6 +238,12 @@ Ref: Inv 2484`,
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// Verify opening balance from "Balance brought forward" line
+	if info.OpeningBalance != 13234.35 {
+		t.Errorf("opening balance: got %.2f, want 13234.35", info.OpeningBalance)
+	}
+
+	t.Logf("opening balance: %.2f", info.OpeningBalance)
 	t.Logf("parsed %d transactions from page 2", len(info.Transactions))
 	for i, txn := range info.Transactions {
 		t.Logf("  [%d] date=%q desc=%q type=%s amount=%.2f balance=%.2f",

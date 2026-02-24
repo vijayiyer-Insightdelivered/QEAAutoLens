@@ -34,10 +34,11 @@ type ConvertResponse struct {
 
 // AccountInfo holds account metadata for the JSON response.
 type AccountInfo struct {
-	Holder   string `json:"holder,omitempty"`
-	Number   string `json:"number,omitempty"`
-	SortCode string `json:"sortCode,omitempty"`
-	Period   string `json:"period,omitempty"`
+	Holder         string  `json:"holder,omitempty"`
+	Number         string  `json:"number,omitempty"`
+	SortCode       string  `json:"sortCode,omitempty"`
+	Period         string  `json:"period,omitempty"`
+	OpeningBalance float64 `json:"openingBalance,omitempty"`
 }
 
 // Handler holds the HTTP handlers for the API.
@@ -229,12 +230,13 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		Version:      "1.1.0",
 	}
 
-	if info.AccountHolder != "" || info.AccountNumber != "" || info.SortCode != "" || info.StatementPeriod != "" {
+	if info.AccountHolder != "" || info.AccountNumber != "" || info.SortCode != "" || info.StatementPeriod != "" || info.OpeningBalance != 0 {
 		resp.AccountInfo = &AccountInfo{
-			Holder:   info.AccountHolder,
-			Number:   info.AccountNumber,
-			SortCode: info.SortCode,
-			Period:   info.StatementPeriod,
+			Holder:         info.AccountHolder,
+			Number:         info.AccountNumber,
+			SortCode:       info.SortCode,
+			Period:         info.StatementPeriod,
+			OpeningBalance: info.OpeningBalance,
 		}
 	}
 

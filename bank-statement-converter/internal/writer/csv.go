@@ -48,6 +48,9 @@ func (w *CSVWriter) Write(out io.Writer, info *models.StatementInfo) error {
 		if info.StatementPeriod != "" {
 			writer.Write([]string{"# Statement Period", info.StatementPeriod})
 		}
+		if info.OpeningBalance != 0 {
+			writer.Write([]string{"# Opening Balance", formatAmount(info.OpeningBalance)})
+		}
 	}
 
 	// Write column headers
