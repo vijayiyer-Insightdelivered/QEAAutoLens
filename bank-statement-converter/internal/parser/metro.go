@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"math"
 	"regexp"
 	"strings"
 
@@ -57,9 +58,16 @@ func (p *MetroBankParser) Parse(pages []string) (*models.StatementInfo, error) {
 func (p *MetroBankParser) parseLines(lines []string) []models.Transaction {
 	var transactions []models.Transaction
 	inTransactionSection := false
+	var lastBalance float64
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
+
+		// Try to extract opening balance before skipping summary lines
+		if bal, ok := extractOpeningBalance(line); ok {
+			lastBalance = bal
+			continue
+		}
 
 		// Detect start of transaction table
 		if containsTransactionHeader(line) {
@@ -87,18 +95,31 @@ func (p *MetroBankParser) parseLines(lines []string) []models.Transaction {
 			paidIn := strings.TrimSpace(m[4])
 			balance := strings.TrimSpace(m[5])
 
-			if paidOut != "" {
+			if paidOut != "" && paidIn != "" {
+				// All three amount columns present — paid out is unambiguous
 				amt, _ := parseAmount(paidOut)
 				txn.Amount = amt
 				txn.Type = "DEBIT"
+				txn.Balance, _ = parseAmount(balance)
+			} else if paidOut != "" {
+				// Only one amount column + balance.
+				// The regex always puts the first number in group 3 (paidOut),
+				// so we cannot tell from the regex alone whether this is
+				// paid out or paid in. Use balance progression to decide.
+				amt, _ := parseAmount(paidOut)
+				bal, _ := parseAmount(balance)
+				txn.Amount = amt
+				txn.Balance = bal
+				txn.Type = classifyByBalance(amt, bal, lastBalance, txn.Description)
 			} else if paidIn != "" {
 				amt, _ := parseAmount(paidIn)
 				txn.Amount = amt
 				txn.Type = "CREDIT"
+				txn.Balance, _ = parseAmount(balance)
 			}
 
-			if balance != "" {
-				txn.Balance, _ = parseAmount(balance)
+			if txn.Balance != 0 {
+				lastBalance = txn.Balance
 			}
 
 			transactions = append(transactions, txn)
@@ -136,6 +157,61 @@ func (p *MetroBankParser) parseLines(lines []string) []models.Transaction {
 
 	return transactions
 }
+
+// classifyByBalance determines whether a transaction is DEBIT or CREDIT
+// by comparing the amount and current balance against the previous balance.
+// Falls back to description-based heuristic when balance info is unavailable.
+func classifyByBalance(amt, bal, prevBal float64, desc string) string {
+	if prevBal != 0 {
+		debitDiff := math.Abs((prevBal - amt) - bal)
+		creditDiff := math.Abs((prevBal + amt) - bal)
+
+		if debitDiff < 0.015 && creditDiff >= 0.015 {
+			return "DEBIT"
+		}
+		if creditDiff < 0.015 && debitDiff >= 0.015 {
+			return "CREDIT"
+		}
+		// Both are close (unlikely) or neither matches — use the closer one
+		if debitDiff < 0.015 && creditDiff < 0.015 {
+			if debitDiff <= creditDiff {
+				return "DEBIT"
+			}
+			return "CREDIT"
+		}
+	}
+
+	// No usable previous balance — fall back to description heuristic
+	if isDebitDescription(desc) {
+		return "DEBIT"
+	}
+	return "CREDIT"
+}
+
+// extractOpeningBalance looks for opening/brought-forward balance lines
+// and returns the balance amount. Returns (0, false) if not found.
+func extractOpeningBalance(line string) (float64, bool) {
+	lower := strings.ToLower(line)
+	if !strings.Contains(lower, "opening balance") &&
+		!strings.Contains(lower, "balance brought forward") &&
+		!strings.Contains(lower, "brought forward") {
+		return 0, false
+	}
+
+	// Find the last amount on the line
+	amounts := metroAmountPattern.FindAllString(line, -1)
+	if len(amounts) == 0 {
+		return 0, false
+	}
+	bal, err := parseAmount(amounts[len(amounts)-1])
+	if err != nil {
+		return 0, false
+	}
+	return bal, true
+}
+
+// metroAmountPattern matches numbers like 1,234.56 or 25.99
+var metroAmountPattern = regexp.MustCompile(`[\d,]+\.\d{2}`)
 
 func containsTransactionHeader(line string) bool {
 	lower := strings.ToLower(line)
