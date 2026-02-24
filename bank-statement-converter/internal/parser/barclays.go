@@ -172,6 +172,11 @@ func (p *BarclaysParser) parseLinesArrow(lines []string) ([]models.Transaction, 
 					}
 				}
 			}
+			// "Balance carried forward" is always the last item on a statement.
+			// Stop processing to avoid picking up trailing boilerplate.
+			if isClosingBalanceLine(line) {
+				return transactions, openingBalance
+			}
 			continue
 		}
 
@@ -253,6 +258,13 @@ func isOpeningBalanceLine(line string) bool {
 	lower := strings.ToLower(line)
 	return strings.Contains(lower, "start balance") ||
 		strings.Contains(lower, "balance brought forward")
+}
+
+// isClosingBalanceLine checks if a line is the final balance entry on the
+// statement.  Everything after it is boilerplate and should be ignored.
+func isClosingBalanceLine(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.Contains(lower, "balance carried forward")
 }
 
 // isBarclaysTransactionLine determines if arrow-separated parts represent a real transaction.
@@ -581,6 +593,10 @@ func (p *BarclaysParser) parseLinesSharedDate(lines []string) ([]models.Transact
 				openingBalance = txn.Balance
 			}
 			transactions = append(transactions, *txn)
+			// "Balance carried forward" is always the last item on a statement.
+			if txn.Type == "BALANCE" && isClosingBalanceLine(txn.Description) {
+				return transactions, openingBalance
+			}
 			continue
 		}
 
