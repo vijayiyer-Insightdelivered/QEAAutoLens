@@ -37,6 +37,7 @@ type StatementInfo struct {
 	AccountNumber   string
 	SortCode        string
 	StatementPeriod string
+	OpeningBalance  float64
 	Transactions    []Transaction
 	DebugLines      []DebugLine
 }
