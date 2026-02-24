@@ -90,6 +90,21 @@ async function extractTextFromPDF(file) {
   return pages
 }
 
+// Check if extracted text is readable (not garbage from bad font decoding).
+// Returns true if the text contains recognizable English words that would
+// appear in a bank statement.
+function isReadableText(text) {
+  if (!text || text.length < 50) return false
+  const lower = text.toLowerCase()
+  const commonWords = [
+    'bank', 'account', 'balance', 'date', 'payment', 'statement',
+    'total', 'amount', 'credit', 'debit', 'transaction', 'sort code',
+    'money', 'paid', 'opening', 'closing', 'transfer', 'direct',
+    'number', 'page', 'period',
+  ]
+  return commonWords.some((word) => lower.includes(word))
+}
+
 function App() {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -106,7 +121,14 @@ function App() {
       try {
         const pages = await extractTextFromPDF(file)
         if (pages.length > 0) {
-          extractedText = pages.join('\n---PAGE_BREAK---\n')
+          const combined = pages.join('\n---PAGE_BREAK---\n')
+          // Only use client-side text if it contains recognizable words
+          // (not garbage from custom font encodings)
+          if (isReadableText(combined)) {
+            extractedText = combined
+          } else {
+            console.warn('Client-side PDF extraction produced unreadable text (custom fonts?), falling back to server')
+          }
         }
       } catch (pdfErr) {
         console.warn('Client-side PDF extraction failed, falling back to server:', pdfErr)

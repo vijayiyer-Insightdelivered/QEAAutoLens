@@ -36,34 +36,25 @@ func ExtractText(filePath string) ([]string, error) {
 		return popplerPages, nil
 	}
 
-	// Return the best readable result we have (even if below threshold)
-	if totalTextLen(pages) > 0 && textQuality(pages) > 0.3 {
-		return pages, nil
-	}
-	if totalTextLen(rawPages) > 0 && textQuality(rawPages) > 0.3 {
-		return rawPages, nil
-	}
-	if totalTextLen(popplerPages) > 0 && textQuality(popplerPages) > 0.3 {
-		return popplerPages, nil
-	}
-
-	// All methods failed
+	// All methods failed — never return garbage text
 	if libErr != nil {
-		return nil, fmt.Errorf("PDF extraction failed: %v (the PDF may use custom fonts that cannot be decoded server-side; try using the web UI which uses browser-based extraction)", libErr)
+		return nil, fmt.Errorf("PDF text extraction failed: %v. The PDF may use custom fonts or be image-based/scanned. Text could not be decoded into readable content", libErr)
 	}
-	return nil, fmt.Errorf("no readable text could be extracted from PDF (the file may be image-based/scanned, or uses custom fonts; try using the web UI which uses browser-based extraction)")
+	return nil, fmt.Errorf("no readable text could be extracted from PDF. The file may be image-based/scanned, or uses custom font encodings that cannot be decoded. Try opening the PDF in your browser, selecting all text (Ctrl+A), copying (Ctrl+C), and pasting into a text file")
 }
 
-// textQuality returns the ratio of readable characters (ASCII letters, digits,
-// common punctuation, whitespace) to total characters. Returns 0.0-1.0.
-// Binary garbage typically scores below 0.4; real text scores above 0.7.
+// textQuality returns the ratio of basic ASCII readable characters (a-z, A-Z,
+// 0-9, common punctuation, whitespace) to total characters. Returns 0.0-1.0.
+// Uses a strict ASCII check — unicode.IsLetter() is too broad and matches
+// accented characters that appear in garbage from identity-encoded fonts.
 func textQuality(pages []string) float64 {
 	total := 0
 	readable := 0
 	for _, page := range pages {
 		for _, r := range page {
 			total++
-			if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) ||
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+				(r >= '0' && r <= '9') || unicode.IsSpace(r) ||
 				r == '.' || r == ',' || r == '-' || r == '/' || r == ':' ||
 				r == ';' || r == '(' || r == ')' || r == '\'' || r == '"' ||
 				r == '£' || r == '$' || r == '€' || r == '%' || r == '&' ||
@@ -79,10 +70,39 @@ func textQuality(pages []string) float64 {
 	return float64(readable) / float64(total)
 }
 
-// isReadableText checks that pages contain enough text AND that it's actually
-// readable (not binary garbage). Requires >50 chars and >60% readable characters.
+// commonWords that appear in virtually all bank statements.
+// If the extracted text contains none of these, it's likely garbage.
+var commonWords = []string{
+	"bank", "account", "balance", "date", "payment", "statement",
+	"total", "amount", "credit", "debit", "transaction", "sort code",
+	"money", "paid", "opening", "closing", "transfer", "direct",
+	"number", "page", "period",
+}
+
+// containsCommonWords checks whether the text contains at least one word
+// that would be expected in a bank statement.
+func containsCommonWords(pages []string) bool {
+	combined := strings.ToLower(strings.Join(pages, " "))
+	for _, word := range commonWords {
+		if strings.Contains(combined, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// isReadableText checks that pages contain enough text, that it's actually
+// readable (not binary garbage), AND that it contains recognizable words.
+// Requires >50 chars, >60% readable ASCII characters, and at least one common word.
 func isReadableText(pages []string) bool {
-	return totalTextLen(pages) > 50 && textQuality(pages) > 0.6
+	if totalTextLen(pages) <= 50 {
+		return false
+	}
+	if textQuality(pages) <= 0.6 {
+		return false
+	}
+	// Final check: the text must contain at least one recognizable word
+	return containsCommonWords(pages)
 }
 
 // IsReadableText is the exported version for use by other packages.
