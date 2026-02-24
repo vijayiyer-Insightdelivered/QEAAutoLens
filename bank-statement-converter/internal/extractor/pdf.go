@@ -36,11 +36,17 @@ func ExtractText(filePath string) ([]string, error) {
 		return popplerPages, nil
 	}
 
+	// All text-based methods failed — try OCR (for scanned/image-based PDFs)
+	ocrPages, ocrErr := ExtractTextOCR(filePath)
+	if ocrErr == nil && isReadableText(ocrPages) {
+		return ocrPages, nil
+	}
+
 	// All methods failed — never return garbage text
 	if libErr != nil {
-		return nil, fmt.Errorf("PDF text extraction failed: %v. The PDF may use custom fonts or be image-based/scanned. Text could not be decoded into readable content", libErr)
+		return nil, fmt.Errorf("PDF text extraction failed: %v. The PDF may be image-based/scanned and OCR also failed (%v)", libErr, ocrErr)
 	}
-	return nil, fmt.Errorf("no readable text could be extracted from PDF. The file may be image-based/scanned, or uses custom font encodings that cannot be decoded. Try opening the PDF in your browser, selecting all text (Ctrl+A), copying (Ctrl+C), and pasting into a text file")
+	return nil, fmt.Errorf("no readable text could be extracted from PDF. All methods failed including OCR. The scan quality may be too low for text recognition")
 }
 
 // textQuality returns the ratio of basic ASCII readable characters (a-z, A-Z,
