@@ -258,7 +258,7 @@ const Dashboard = () => {
 
   const handleTabChange = (_, newValue) => {
     setTabValue(newValue);
-    setChartType(['sales', 'overheads', 'cost'][newValue]);
+    setChartType(['sales', 'overheads', 'cost', 'overheadByType'][newValue] || 'sales');
     setChartYear(null);
     setViewType('chart');
   };
@@ -572,7 +572,7 @@ const Dashboard = () => {
     { label: 'Closed', count: enquiryCounts.Closed, color: '#EF4444', Icon: CancelIcon, navState: { tab: 'Closed' } }
   ];
 
-  const chartBarColor = { sales: '#3B82F6', overheads: '#8B5CF6', cost: '#F59E0B' }[chartType];
+  const chartBarColor = { sales: '#3B82F6', overheads: '#8B5CF6', cost: '#F59E0B', overheadByType: '#06B6D4' }[chartType] || '#3B82F6';
 
   // Assign a stable color per overhead type for the summary
   const ohTypeColors = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#F97316', '#06B6D4', '#EC4899', '#84CC16', '#6366F1'];
@@ -581,83 +581,73 @@ const Dashboard = () => {
   return (
     <Box sx={{ pb: 4 }}>
       {/* ================================================================
-          TOP SECTION: Stock cards + Age chart (left 8) | Enquiries (right 4)
+          TOP SECTION: Stock cards (left) | Age chart (centre) | Enquiries (right)
           ================================================================ */}
-      <Grid container spacing={2.5}>
-        {/* LEFT — Stock KPIs + Age Analysis */}
-        <Grid item xs={12} md={8}>
-          {/* Stock KPI cards */}
-          <Grid container spacing={2.5}>
+      <Grid container spacing={2.5} sx={{ alignItems: 'stretch' }}>
+        {/* LEFT — Stock KPIs stacked vertically */}
+        <Grid item xs={12} md={3}>
+          <Box sx={{ mb: 1.5 }}>
+            <Typography variant="h6" sx={sectionTitle}>Inventory</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Current stock overview</Typography>
+          </Box>
+          <Stack spacing={2}>
             {stockStats.map((s) => (
-              <Grid item xs={12} sm={4} key={s.label}>
-                <StatCard {...s} />
-              </Grid>
+              <StatCard key={s.label} {...s} />
             ))}
-          </Grid>
+          </Stack>
+        </Grid>
 
-          {/* Stock Age Analysis — directly below stock cards */}
-          <Card sx={{ ...cardShell, mt: 2.5 }}>
-            <SectionHeader icon={AccessTimeIcon} color="#8B5CF6" title="Stock Age Analysis" subtitle="How long current inventory has been in stock" />
-            <CardContent sx={{ px: 3, pt: 3, pb: 3 }}>
+        {/* CENTRE — Stock Age Analysis */}
+        <Grid item xs={12} md={5}>
+          <Card sx={{ ...cardShell, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <SectionHeader icon={AccessTimeIcon} color="#8B5CF6" title="Stock Age Analysis" subtitle="Inventory age breakdown" />
+            <CardContent sx={{ px: 2, pt: 2, pb: 2, flex: 1, display: 'flex', flexDirection: 'column' }}>
               {stockAgeData.every((b) => b.count === 0) ? (
                 <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 6 }}>
                   No active stock data available
                 </Typography>
               ) : (
-                <Grid container spacing={2}>
-                  <Grid item xs={12} lg={7}>
-                    <Box sx={{ width: '100%', height: 260 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={stockAgeData} layout="vertical" margin={{ top: 5, right: 24, left: 10, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={alpha('#000', 0.06)} />
-                          <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: theme.palette.text.secondary }} allowDecimals={false} />
-                          <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} width={95} tick={{ fontSize: 11, fontWeight: 500, fill: theme.palette.text.secondary }} />
-                          <Tooltip
-                            content={({ active, payload, label }) => {
-                              if (!active || !payload?.length) return null;
-                              const d = payload[0].payload;
-                              return (
-                                <Box sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.5, boxShadow: '0 8px 32px rgba(0,0,0,0.12)' }}>
-                                  <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>{label}</Typography>
-                                  <Typography variant="body1" sx={{ fontWeight: 700, mt: 0.25 }}>{d.count} vehicle{d.count !== 1 ? 's' : ''}</Typography>
-                                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>{GBP(d.value)} total value</Typography>
-                                </Box>
-                              );
-                            }}
-                            cursor={{ fill: alpha('#8B5CF6', 0.06) }}
-                          />
-                          <Bar dataKey="count" barSize={24} radius={[0, 8, 8, 0]}>
-                            {stockAgeData.map((entry, index) => (
-                              <Cell key={index} fill={entry.color} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} lg={5}>
-                    <Stack spacing={1}>
-                      {stockAgeData.map((bucket) => (
-                        <Box
-                          key={bucket.label}
-                          sx={{
-                            display: 'flex', alignItems: 'center', gap: 1.5, p: 1.25,
-                            borderRadius: 2, border: '1px solid', borderColor: 'divider',
-                            transition: 'background-color 0.15s ease',
-                            '&:hover': { bgcolor: alpha(bucket.color, 0.04) }
+                <>
+                  <Box sx={{ width: '100%', flex: 1, minHeight: 200 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={stockAgeData} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={alpha('#000', 0.06)} />
+                        <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: theme.palette.text.secondary }} allowDecimals={false} />
+                        <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} width={85} tick={{ fontSize: 10, fontWeight: 500, fill: theme.palette.text.secondary }} />
+                        <Tooltip
+                          content={({ active, payload, label }) => {
+                            if (!active || !payload?.length) return null;
+                            const d = payload[0].payload;
+                            return (
+                              <Box sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, px: 2, py: 1.5, boxShadow: '0 8px 32px rgba(0,0,0,0.12)' }}>
+                                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>{label}</Typography>
+                                <Typography variant="body1" sx={{ fontWeight: 700, mt: 0.25 }}>{d.count} vehicle{d.count !== 1 ? 's' : ''}</Typography>
+                                <Typography variant="body2" sx={{ color: 'text.secondary' }}>{GBP(d.value)} total value</Typography>
+                              </Box>
+                            );
                           }}
-                        >
-                          <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: bucket.color, flexShrink: 0 }} />
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>{bucket.label}</Typography>
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>{GBPCompact(bucket.value)}</Typography>
-                          </Box>
-                          <Typography variant="h6" sx={{ fontWeight: 800, color: bucket.color }}>{bucket.count}</Typography>
-                        </Box>
-                      ))}
-                    </Stack>
-                  </Grid>
-                </Grid>
+                          cursor={{ fill: alpha('#8B5CF6', 0.06) }}
+                        />
+                        <Bar dataKey="count" barSize={20} radius={[0, 8, 8, 0]}>
+                          {stockAgeData.map((entry, index) => (
+                            <Cell key={index} fill={entry.color} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Box>
+                  {/* Compact legend row */}
+                  <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
+                    {stockAgeData.map((b) => (
+                      <Box key={b.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: b.color, flexShrink: 0 }} />
+                        <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.65rem', color: 'text.secondary' }}>
+                          {b.count} &middot; {b.label}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                </>
               )}
             </CardContent>
           </Card>
@@ -737,6 +727,7 @@ const Dashboard = () => {
             <Tab label="Sales" />
             <Tab label="Overheads" />
             <Tab label="Cost" />
+            <Tab label="Overhead by Type" />
           </Tabs>
 
           {(tabValue === 0 || tabValue === 1) && (
@@ -755,7 +746,7 @@ const Dashboard = () => {
 
         <CardContent sx={{ px: 3, pt: 3, pb: 3 }}>
           {/* Bar Chart */}
-          {(tabValue === 2 || viewType === 'chart') && (
+          {((tabValue === 2 || viewType === 'chart') && tabValue !== 3) && (
             <Box sx={{ width: '100%', height: { xs: 300, md: 400 } }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 24, right: 12, left: 0, bottom: 5 }}>
@@ -874,94 +865,88 @@ const Dashboard = () => {
               </Box>
             </>
           )}
-        </CardContent>
-      </Card>
 
-      {/* ================================================================
-          OVERHEAD SUMMARY — Pivot table: overhead_type columns x month rows
-          ================================================================ */}
-      <Card sx={{ ...cardShell, mt: 4 }}>
-        <SectionHeader icon={CategoryIcon} color="#06B6D4" title="Overhead Summary by Type" subtitle="Monthly breakdown across all overhead categories" />
-
-        <CardContent sx={{ px: 3, pt: 3, pb: 3 }}>
-          {overheadSummary.types.length === 0 ? (
-            <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 6 }}>
-              No overhead data available
-            </Typography>
-          ) : (
+          {/* Overhead by Type pivot table */}
+          {tabValue === 3 && (
             <>
-              <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
-                <Table sx={{ minWidth: 650 }}>
-                  <TableHead>
-                    <TableRow
-                      sx={{
-                        background: `linear-gradient(135deg, ${alpha('#06B6D4', 0.08)}, ${alpha('#06B6D4', 0.03)})`,
-                        '& .MuiTableCell-root': { fontWeight: 700, fontSize: '0.78rem', color: 'text.primary', letterSpacing: '0.02em', py: 1.5, whiteSpace: 'nowrap' }
-                      }}
-                    >
-                      <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>Month</TableCell>
-                      {overheadSummary.types.map((type, i) => (
-                        <TableCell key={type} align="right">
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.75 }}>
-                            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: ohTypeColors[i % ohTypeColors.length], flexShrink: 0 }} />
-                            {type}
-                          </Box>
-                        </TableCell>
-                      ))}
-                      <TableCell align="right" sx={{ fontWeight: 800 }}>Total</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {paginatedOhSummaryRows.map((row, idx) => (
-                      <TableRow
-                        key={idx}
-                        sx={{
-                          '&:nth-of-type(even)': { bgcolor: alpha('#06B6D4', 0.02) },
-                          '&:hover': { bgcolor: alpha('#06B6D4', 0.05) },
-                          transition: 'background-color 0.15s ease',
-                          '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem' }
-                        }}
-                      >
-                        <TableCell sx={{ fontWeight: 600, position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>{row.month}</TableCell>
-                        {overheadSummary.types.map((type) => (
-                          <TableCell key={type} align="right">
-                            {row[type] ? GBP(row[type]) : <Typography component="span" sx={{ color: 'text.disabled', fontSize: '0.8rem' }}>&mdash;</Typography>}
-                          </TableCell>
+              {overheadSummary.types.length === 0 ? (
+                <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 6 }}>
+                  No overhead data available
+                </Typography>
+              ) : (
+                <>
+                  <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
+                    <Table sx={{ minWidth: 650 }}>
+                      <TableHead>
+                        <TableRow
+                          sx={{
+                            background: `linear-gradient(135deg, ${alpha('#06B6D4', 0.08)}, ${alpha('#06B6D4', 0.03)})`,
+                            '& .MuiTableCell-root': { fontWeight: 700, fontSize: '0.78rem', color: 'text.primary', letterSpacing: '0.02em', py: 1.5, whiteSpace: 'nowrap' }
+                          }}
+                        >
+                          <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>Month</TableCell>
+                          {overheadSummary.types.map((type, i) => (
+                            <TableCell key={type} align="right">
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.75 }}>
+                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: ohTypeColors[i % ohTypeColors.length], flexShrink: 0 }} />
+                                {type}
+                              </Box>
+                            </TableCell>
+                          ))}
+                          <TableCell align="right" sx={{ fontWeight: 800 }}>Total</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {paginatedOhSummaryRows.map((row, idx) => (
+                          <TableRow
+                            key={idx}
+                            sx={{
+                              '&:nth-of-type(even)': { bgcolor: alpha('#06B6D4', 0.02) },
+                              '&:hover': { bgcolor: alpha('#06B6D4', 0.05) },
+                              transition: 'background-color 0.15s ease',
+                              '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem' }
+                            }}
+                          >
+                            <TableCell sx={{ fontWeight: 600, position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>{row.month}</TableCell>
+                            {overheadSummary.types.map((type) => (
+                              <TableCell key={type} align="right">
+                                {row[type] ? GBP(row[type]) : <Typography component="span" sx={{ color: 'text.disabled', fontSize: '0.8rem' }}>&mdash;</Typography>}
+                              </TableCell>
+                            ))}
+                            <TableCell align="right" sx={{ fontWeight: 700 }}>{GBP(row._total)}</TableCell>
+                          </TableRow>
                         ))}
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>{GBP(row._total)}</TableCell>
-                      </TableRow>
-                    ))}
-
-                    {/* Grand totals footer row */}
-                    <TableRow sx={{ bgcolor: alpha('#06B6D4', 0.06), '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem', fontWeight: 700, borderTop: '2px solid', borderColor: 'divider' } }}>
-                      <TableCell sx={{ position: 'sticky', left: 0, bgcolor: alpha('#06B6D4', 0.06), zIndex: 1 }}>Grand Total</TableCell>
-                      {overheadSummary.types.map((type) => (
-                        <TableCell key={type} align="right">{GBP(overheadSummary.typeTotals[type])}</TableCell>
-                      ))}
-                      <TableCell align="right" sx={{ fontWeight: 800 }}>{GBP(overheadSummary.grandTotal)}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </TableContainer>
-
-              {/* Pagination */}
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, px: 0.5 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>Show:</Typography>
-                  <FormControl size="small">
-                    <Select value={ohSummaryRowsPerPage} onChange={(e) => { setOhSummaryRowsPerPage(parseInt(e.target.value, 10)); setOhSummaryPage(1); }} sx={{ minWidth: 64, borderRadius: 1.5, fontSize: '0.85rem' }}>
-                      <MenuItem value={6}>6</MenuItem>
-                      <MenuItem value={12}>12</MenuItem>
-                      <MenuItem value={24}>24</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
-                <Pagination count={totalOhSummaryPages} page={ohSummaryPage} onChange={(_, p) => setOhSummaryPage(p)} color="primary" size="small" sx={{ '& .MuiPaginationItem-root': { borderRadius: 1.5, fontWeight: 600, minWidth: 32, height: 32 } }} />
-              </Box>
+                        {/* Grand totals footer */}
+                        <TableRow sx={{ bgcolor: alpha('#06B6D4', 0.06), '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem', fontWeight: 700, borderTop: '2px solid', borderColor: 'divider' } }}>
+                          <TableCell sx={{ position: 'sticky', left: 0, bgcolor: alpha('#06B6D4', 0.06), zIndex: 1 }}>Grand Total</TableCell>
+                          {overheadSummary.types.map((type) => (
+                            <TableCell key={type} align="right">{GBP(overheadSummary.typeTotals[type])}</TableCell>
+                          ))}
+                          <TableCell align="right" sx={{ fontWeight: 800 }}>{GBP(overheadSummary.grandTotal)}</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, px: 0.5 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>Show:</Typography>
+                      <FormControl size="small">
+                        <Select value={ohSummaryRowsPerPage} onChange={(e) => { setOhSummaryRowsPerPage(parseInt(e.target.value, 10)); setOhSummaryPage(1); }} sx={{ minWidth: 64, borderRadius: 1.5, fontSize: '0.85rem' }}>
+                          <MenuItem value={6}>6</MenuItem>
+                          <MenuItem value={12}>12</MenuItem>
+                          <MenuItem value={24}>24</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Box>
+                    <Pagination count={totalOhSummaryPages} page={ohSummaryPage} onChange={(_, p) => setOhSummaryPage(p)} color="primary" size="small" sx={{ '& .MuiPaginationItem-root': { borderRadius: 1.5, fontWeight: 600, minWidth: 32, height: 32 } }} />
+                  </Box>
+                </>
+              )}
             </>
           )}
         </CardContent>
       </Card>
+
     </Box>
   );
 };
