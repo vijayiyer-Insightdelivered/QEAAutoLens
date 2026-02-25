@@ -2,13 +2,11 @@ package api
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/gofiber/fiber/v2"
 
 	"github.com/insightdelivered/bank-statement-converter/internal/extractor"
 	"github.com/insightdelivered/bank-statement-converter/internal/models"
@@ -18,18 +16,18 @@ import (
 
 // ConvertResponse is the JSON response from the /api/convert endpoint.
 type ConvertResponse struct {
-	Success      bool                  `json:"success"`
-	Error        string                `json:"error,omitempty"`
-	Bank         string                `json:"bank,omitempty"`
-	AccountInfo  *AccountInfo          `json:"accountInfo,omitempty"`
-	Transactions []models.Transaction  `json:"transactions"`
-	CSV          string                `json:"csv,omitempty"`
-	TotalDebit   float64               `json:"totalDebit"`
-	TotalCredit  float64               `json:"totalCredit"`
-	Count        int                   `json:"count"`
-	RawText      string                `json:"rawText,omitempty"`
-	Version      string                `json:"version,omitempty"`
-	DebugLines   []models.DebugLine    `json:"debugLines,omitempty"`
+	Success      bool                 `json:"success"`
+	Error        string               `json:"error,omitempty"`
+	Bank         string               `json:"bank,omitempty"`
+	AccountInfo  *AccountInfo         `json:"accountInfo,omitempty"`
+	Transactions []models.Transaction `json:"transactions"`
+	CSV          string               `json:"csv,omitempty"`
+	TotalDebit   float64              `json:"totalDebit"`
+	TotalCredit  float64              `json:"totalCredit"`
+	Count        int                  `json:"count"`
+	RawText      string               `json:"rawText,omitempty"`
+	Version      string               `json:"version,omitempty"`
+	DebugLines   []models.DebugLine   `json:"debugLines,omitempty"`
 }
 
 // AccountInfo holds account metadata for the JSON response.
@@ -41,88 +39,36 @@ type AccountInfo struct {
 	OpeningBalance float64 `json:"openingBalance,omitempty"`
 }
 
-// Handler holds the HTTP handlers for the API.
-type Handler struct {
-	StaticDir string
-}
+const apiVersion = "2.0.0"
 
-// RegisterRoutes sets up the HTTP routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/convert", h.handleConvert)
-	mux.HandleFunc("/api/health", h.handleHealth)
-
-	// Serve React static files
-	if h.StaticDir != "" {
-		fs := http.FileServer(http.Dir(h.StaticDir))
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			// For SPA: serve index.html for non-file routes
-			path := r.URL.Path
-			if path != "/" && !strings.HasPrefix(path, "/api/") {
-				fullPath := filepath.Join(h.StaticDir, path)
-				if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-					http.ServeFile(w, r, filepath.Join(h.StaticDir, "index.html"))
-					return
-				}
-			}
-			fs.ServeHTTP(w, r)
-		})
-	}
-}
-
-func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+// HandleHealth returns a simple health check.
+func HandleHealth(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
 		"status":  "ok",
-		"version": "1.1.0",
+		"version": apiVersion,
+		"engine":  "fiber",
 	})
 }
 
-func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
-	setCORS(w)
-
-	// Recover from any panics to prevent server crash
-	defer func() {
-		if rec := recover(); rec != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Internal server error (recovered from crash): %v", rec))
-		}
-	}()
-
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "POST required")
-		return
-	}
-
-	// Parse multipart form (max 32MB)
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse form: %v", err))
-		return
-	}
-
+// HandleConvert processes a PDF upload and returns parsed transactions.
+func HandleConvert(c *fiber.Ctx) error {
 	// Get the uploaded file
-	file, header, err := r.FormFile("file")
+	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "No file uploaded. Use form field 'file'.")
-		return
+		return writeError(c, fiber.StatusBadRequest, "No file uploaded. Use form field 'file'.")
 	}
-	defer file.Close()
 
 	// Validate it's a PDF
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".pdf") {
-		writeError(w, http.StatusBadRequest, "Only PDF files are supported.")
-		return
+	if !strings.HasSuffix(strings.ToLower(fileHeader.Filename), ".pdf") {
+		return writeError(c, fiber.StatusBadRequest, "Only PDF files are supported.")
 	}
 
-	// Get optional bank parameter
-	bankParam := r.FormValue("bank")
-	includeHeader := r.FormValue("header") != "false"
+	// Get optional parameters
+	bankParam := c.FormValue("bank")
+	includeHeader := c.FormValue("header") != "false"
 
 	// Check if pre-extracted text was provided (from client-side pdf.js extraction)
-	extractedText := r.FormValue("extractedText")
+	extractedText := c.FormValue("extractedText")
 	var pages []string
 
 	if extractedText != "" {
@@ -147,23 +93,20 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 	if len(pages) == 0 {
 		tmpFile, err := os.CreateTemp("", "statement-*.pdf")
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to create temp file.")
-			return
+			return writeError(c, fiber.StatusInternalServerError, "Failed to create temp file.")
 		}
 		defer os.Remove(tmpFile.Name())
 		defer tmpFile.Close()
 
-		if _, err := io.Copy(tmpFile, file); err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to save uploaded file.")
-			return
+		// Save the uploaded file to a temp location
+		if err := c.SaveFile(fileHeader, tmpFile.Name()); err != nil {
+			return writeError(c, fiber.StatusInternalServerError, "Failed to save uploaded file.")
 		}
-		tmpFile.Close()
 
 		var extractErr error
 		pages, extractErr = extractor.ExtractText(tmpFile.Name())
 		if extractErr != nil {
-			writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("PDF extraction failed: %v", extractErr))
-			return
+			return writeError(c, fiber.StatusUnprocessableEntity, fmt.Sprintf("PDF extraction failed: %v", extractErr))
 		}
 	}
 
@@ -178,14 +121,12 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		case "barclays":
 			bankType = models.BankBarclays
 		default:
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("Unknown bank: %q. Use metro, hsbc, or barclays.", bankParam))
-			return
+			return writeError(c, fiber.StatusBadRequest, fmt.Sprintf("Unknown bank: %q. Use metro, hsbc, or barclays.", bankParam))
 		}
 	} else {
 		detected, err := parser.AutoDetect(pages)
 		if err != nil {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
-			return
+			return writeError(c, fiber.StatusUnprocessableEntity, err.Error())
 		}
 		bankType = detected
 	}
@@ -193,22 +134,19 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 	// Parse
 	p, err := parser.New(bankType)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return writeError(c, fiber.StatusInternalServerError, err.Error())
 	}
 
 	info, err := p.Parse(pages)
 	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("Parsing failed: %v", err))
-		return
+		return writeError(c, fiber.StatusUnprocessableEntity, fmt.Sprintf("Parsing failed: %v", err))
 	}
 
 	// Generate CSV string
 	var csvBuf bytes.Buffer
 	csvWriter := &writer.CSVWriter{IncludeHeader: includeHeader}
 	if err := csvWriter.Write(&csvBuf, info); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("CSV generation failed: %v", err))
-		return
+		return writeError(c, fiber.StatusInternalServerError, fmt.Sprintf("CSV generation failed: %v", err))
 	}
 
 	// Calculate totals
@@ -235,7 +173,7 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 		TotalDebit:   totalDebit,
 		TotalCredit:  totalCredit,
 		Count:        len(txns),
-		Version:      "1.1.0",
+		Version:      apiVersion,
 	}
 
 	if info.AccountHolder != "" || info.AccountNumber != "" || info.SortCode != "" || info.StatementPeriod != "" || info.OpeningBalance != 0 {
@@ -254,20 +192,11 @@ func (h *Handler) handleConvert(w http.ResponseWriter, r *http.Request) {
 	// Include debug lines for diagnosing parse issues
 	resp.DebugLines = info.DebugLines
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	return c.JSON(resp)
 }
 
-func setCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ConvertResponse{
+func writeError(c *fiber.Ctx, status int, msg string) error {
+	return c.Status(status).JSON(ConvertResponse{
 		Success: false,
 		Error:   msg,
 	})

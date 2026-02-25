@@ -3,10 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/http"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"github.com/insightdelivered/bank-statement-converter/internal/api"
 	"github.com/insightdelivered/bank-statement-converter/internal/extractor"
@@ -15,7 +20,7 @@ import (
 	"github.com/insightdelivered/bank-statement-converter/internal/writer"
 )
 
-const version = "1.0.0"
+const version = "2.0.0"
 
 func main() {
 	// CLI flags
@@ -29,7 +34,7 @@ func main() {
 	staticFlag := flag.String("static", "", "Path to React build directory (used with --serve)")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Bank Statement PDF to CSV Converter
+		fmt.Fprintf(os.Stderr, `Bank Statement PDF to CSV Converter (Fiber v2)
 by Insight Delivered (QEA AutoLens)
 
 Converts bank statement PDFs from Metro Bank, HSBC, and Barclays
@@ -58,7 +63,7 @@ Examples:
   # Convert multiple files
   bank-statement-converter --bank=barclays jan.pdf feb.pdf mar.pdf
 
-  # Start web UI
+  # Start web UI (Go Fiber)
   bank-statement-converter --serve --port=3001
 
 Supported Banks:
@@ -71,7 +76,7 @@ Supported Banks:
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("bank-statement-converter v%s\n", version)
+		fmt.Printf("bank-statement-converter v%s (Go Fiber)\n", version)
 		os.Exit(0)
 	}
 
@@ -113,13 +118,48 @@ Supported Banks:
 }
 
 func startServer(port, staticDir string) {
-	mux := http.NewServeMux()
+	app := fiber.New(fiber.Config{
+		AppName:   "Bank Statement Converter v" + version,
+		BodyLimit: 32 * 1024 * 1024, // 32MB max upload
+	})
 
-	h := &api.Handler{StaticDir: staticDir}
-	h.RegisterRoutes(mux)
+	// Middleware
+	app.Use(recover.New())
+	app.Use(logger.New(logger.Config{
+		Format: "${time} | ${status} | ${latency} | ${method} ${path}\n",
+	}))
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowMethods: "GET,POST,OPTIONS",
+		AllowHeaders: "Content-Type",
+	}))
+
+	// API routes
+	apiGroup := app.Group("/api")
+	apiGroup.Get("/health", api.HandleHealth)
+	apiGroup.Post("/convert", api.HandleConvert)
+
+	// Serve React static files (SPA)
+	if staticDir != "" {
+		app.Static("/", staticDir, fiber.Static{
+			Index: "index.html",
+		})
+		// SPA fallback: serve index.html for any non-file, non-API route
+		app.Get("/*", func(c *fiber.Ctx) error {
+			path := c.Path()
+			if strings.HasPrefix(path, "/api/") {
+				return c.SendStatus(fiber.StatusNotFound)
+			}
+			fullPath := filepath.Join(staticDir, path)
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				return c.SendFile(filepath.Join(staticDir, "index.html"))
+			}
+			return c.Next()
+		})
+	}
 
 	addr := ":" + port
-	fmt.Printf("Bank Statement Converter - Web UI\n")
+	fmt.Printf("Bank Statement Converter v%s — Go Fiber\n", version)
 	fmt.Printf("Server starting on http://localhost%s\n", addr)
 	if staticDir != "" {
 		fmt.Printf("Serving UI from: %s\n", staticDir)
@@ -128,9 +168,7 @@ func startServer(port, staticDir string) {
 		fmt.Printf("Run React dev server separately: cd web && npm run dev\n")
 	}
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		fatalf("Server error: %v\n", err)
-	}
+	log.Fatal(app.Listen(addr))
 }
 
 func processFile(inputPath string, bankType models.BankType, outputPath string, includeHeader bool) error {
