@@ -27,9 +27,7 @@ import Pagination from '@mui/material/Pagination';
 import {
   Inventory2Outlined,
   PointOfSaleOutlined,
-  MonetizationOnOutlined,
-  AccountTreeOutlined,
-  CurrencyPound
+  MonetizationOnOutlined
 } from '@mui/icons-material';
 import QuestionAnswerIcon from '@mui/icons-material/QuestionAnswer';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
@@ -71,15 +69,6 @@ const parseDateSafe = (raw) => {
 // ---------------------------------------------------------------------------
 // Reusable style constants
 // ---------------------------------------------------------------------------
-const cardBase = {
-  borderRadius: 3,
-  transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-  '&:hover': {
-    transform: 'translateY(-4px)',
-    boxShadow: '0 12px 28px rgba(0,0,0,0.12)'
-  }
-};
-
 const cardShell = {
   borderRadius: 3,
   boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.08)',
@@ -96,92 +85,6 @@ const sectionTitle = {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-/** KPI stat card with gradient icon badge and accent stripe */
-const StatCard = ({ label, count, value, color, Icon, onClick }) => (
-  <Card
-    onClick={onClick}
-    sx={{
-      ...cardBase,
-      cursor: onClick ? 'pointer' : 'default',
-      position: 'relative',
-      overflow: 'hidden',
-      height: '100%',
-      bgcolor: 'background.paper',
-      boxShadow: `0 1px 3px ${alpha(color, 0.12)}, 0 8px 24px ${alpha(color, 0.08)}`
-    }}
-  >
-    <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg, ${color}, ${alpha(color, 0.4)})` }} />
-    <CardContent sx={{ pt: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <Box sx={{ flex: 1 }}>
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.7rem' }}>
-            {label}
-          </Typography>
-          <Typography variant="h3" sx={{ fontWeight: 800, mt: 0.5, lineHeight: 1.1 }}>
-            {count}
-          </Typography>
-        </Box>
-        <Box
-          sx={{
-            width: 48, height: 48, borderRadius: 2.5,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: `linear-gradient(135deg, ${color}, ${alpha(color, 0.7)})`,
-            color: '#fff', boxShadow: `0 4px 14px ${alpha(color, 0.4)}`
-          }}
-        >
-          <Icon sx={{ fontSize: 24 }} />
-        </Box>
-      </Box>
-      {value !== undefined && (
-        <Box sx={{ display: 'flex', alignItems: 'center', mt: 2, pt: 1.5, borderTop: `1px solid ${alpha(color, 0.1)}` }}>
-          <CurrencyPound sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-          <Typography variant="body1" sx={{ fontWeight: 700, color: 'text.primary' }}>{GBPCompact(value)}</Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary', ml: 1 }}>{GBP(value)}</Typography>
-        </Box>
-      )}
-    </CardContent>
-  </Card>
-);
-
-/** Enquiry status card — compact variant for vertical stacking */
-const EnquiryCard = ({ label, count, color, Icon, isLoading, onClick }) => (
-  <Card
-    onClick={onClick}
-    sx={{
-      ...cardBase,
-      cursor: 'pointer',
-      position: 'relative',
-      overflow: 'hidden',
-      bgcolor: 'background.paper',
-      boxShadow: `0 1px 3px ${alpha(color, 0.12)}, 0 8px 24px ${alpha(color, 0.08)}`
-    }}
-  >
-    <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg, ${color}, ${alpha(color, 0.4)})` }} />
-    <CardContent sx={{ pt: 2.5, pb: '16px !important', px: 2.5 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box>
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: '0.65rem' }}>
-            {label}
-          </Typography>
-          <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.25, lineHeight: 1.1 }}>
-            {isLoading ? <Skeleton width={40} /> : count}
-          </Typography>
-        </Box>
-        <Box
-          sx={{
-            width: 40, height: 40, borderRadius: 2,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: `linear-gradient(135deg, ${color}, ${alpha(color, 0.7)})`,
-            color: '#fff', boxShadow: `0 4px 14px ${alpha(color, 0.4)}`
-          }}
-        >
-          <Icon sx={{ fontSize: 20 }} />
-        </Box>
-      </Box>
-    </CardContent>
-  </Card>
-);
-
 /** Custom Recharts tooltip */
 const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -192,26 +95,6 @@ const ChartTooltip = ({ active, payload, label }) => {
     </Box>
   );
 };
-
-/** Section header with icon badge */
-const SectionHeader = ({ icon: IconComp, color, title, subtitle }) => (
-  <Box sx={{ px: 3, pt: 2.5, pb: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: 1, borderColor: 'divider' }}>
-    <Box
-      sx={{
-        width: 36, height: 36, borderRadius: 2,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: `linear-gradient(135deg, ${color}, ${alpha(color, 0.6)})`,
-        color: '#fff'
-      }}
-    >
-      <IconComp sx={{ fontSize: 20 }} />
-    </Box>
-    <Box>
-      <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>{title}</Typography>
-      <Typography variant="caption" sx={{ color: 'text.secondary' }}>{subtitle}</Typography>
-    </Box>
-  </Box>
-);
 
 // ---------------------------------------------------------------------------
 // Main Dashboard
@@ -255,6 +138,16 @@ const Dashboard = () => {
   };
   const [ohSummaryPage, setOhSummaryPage] = useState(1);
   const [ohSummaryRowsPerPage, setOhSummaryRowsPerPage] = useState(getInitialOhSummaryRowsPerPage());
+
+  // Stock Age view toggle
+  const [stockAgeView, setStockAgeView] = useState('chart');
+
+  // Cost pagination
+  const [costPage, setCostPage] = useState(1);
+  const [costRowsPerPage, setCostRowsPerPage] = useState(() => {
+    const stored = localStorage.getItem('costRowsPerPage');
+    return stored ? parseInt(stored, 10) : 10;
+  });
 
   const handleTabChange = (_, newValue) => {
     setTabValue(newValue);
@@ -461,6 +354,32 @@ const Dashboard = () => {
     salesPage * salesRowsPerPage
   );
 
+  // Month-wise cost for table view
+  const monthWiseCost = useMemo(() => {
+    if (!Array.isArray(costkData)) return [];
+    const grouped = {};
+    costkData.forEach((row) => {
+      const d = parseDateSafe(row.date);
+      if (!d) return;
+      const key = d.format('YYYY-MM');
+      if (!grouped[key]) grouped[key] = { month: d.format('MMM YYYY'), count: 0, total: 0 };
+      grouped[key].count += 1;
+      grouped[key].total += parseFloat(row.cost_value || 0);
+    });
+    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([, val]) => val);
+  }, [costkData]);
+
+  // Cost pagination persistence
+  useEffect(() => {
+    try { localStorage.setItem('costRowsPerPage', String(costRowsPerPage)); } catch {}
+  }, [costRowsPerPage]);
+
+  const totalCostPages = Math.max(1, Math.ceil((monthWiseCost?.length || 0) / (costRowsPerPage || 1)));
+  const paginatedMonthCost = (monthWiseCost || []).slice(
+    (costPage - 1) * costRowsPerPage,
+    costPage * costRowsPerPage
+  );
+
   // Stock Age Analysis — bucket active stock by days in inventory
   const AGE_BUCKETS = [
     { label: '0\u201330 days', min: 0, max: 30, color: '#10B981' },
@@ -581,39 +500,115 @@ const Dashboard = () => {
   return (
     <Box sx={{ pb: 4 }}>
       {/* ================================================================
-          TOP SECTION: Stock cards (left) | Age chart (centre) | Enquiries (right)
+          TOP SECTION: Summary cards (left) | Stock Age Analysis (right)
           ================================================================ */}
       <Grid container spacing={2.5} sx={{ alignItems: 'stretch' }}>
-        {/* LEFT — Stock KPIs stacked vertically */}
+        {/* LEFT — Inventory + Enquiry combined cards */}
         <Grid item xs={12} md={3}>
-          <Box sx={{ mb: 1.5 }}>
-            <Typography variant="h6" sx={sectionTitle}>Inventory</Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Current stock overview</Typography>
-          </Box>
-          <Stack spacing={2}>
-            {stockStats.map((s) => (
-              <StatCard key={s.label} {...s} />
-            ))}
+          <Stack spacing={2.5} sx={{ height: '100%' }}>
+            {/* Inventory card */}
+            <Card sx={{ ...cardShell, position: 'relative', overflow: 'hidden', flex: 1 }}>
+              <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #3B82F6, #10B981, #F59E0B)' }} />
+              <CardContent sx={{ pt: 2.5, pb: '20px !important', px: 2.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                  <Box sx={{ width: 28, height: 28, borderRadius: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #3B82F6, rgba(59,130,246,0.6))', color: '#fff' }}>
+                    <Inventory2Outlined sx={{ fontSize: 16 }} />
+                  </Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, letterSpacing: '0.02em' }}>Inventory</Typography>
+                </Box>
+                <Stack spacing={1.5}>
+                  {stockStats.map((s) => (
+                    <Box key={s.label} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: s.color, flexShrink: 0 }} />
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{s.label}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1 }}>{s.count}</Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500, minWidth: 55, textAlign: 'right' }}>{GBPCompact(s.value)}</Typography>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+              </CardContent>
+            </Card>
+
+            {/* Enquiry Status card */}
+            <Card sx={{ ...cardShell, position: 'relative', overflow: 'hidden', flex: 1 }}>
+              <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #F59E0B, #3B82F6, #EF4444)' }} />
+              <CardContent sx={{ pt: 2.5, pb: '20px !important', px: 2.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                  <Box sx={{ width: 28, height: 28, borderRadius: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #3B82F6, rgba(59,130,246,0.6))', color: '#fff' }}>
+                    <QuestionAnswerIcon sx={{ fontSize: 16 }} />
+                  </Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, letterSpacing: '0.02em' }}>Enquiry Status</Typography>
+                </Box>
+                <Stack spacing={1}>
+                  {enquiryStats.map((e) => (
+                    <Box
+                      key={e.label}
+                      onClick={() => navigate('/enquiry', e.navState ? { state: e.navState } : undefined)}
+                      sx={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        cursor: 'pointer', px: 1, py: 0.75, borderRadius: 1.5, mx: -1,
+                        transition: 'background-color 0.15s ease',
+                        '&:hover': { bgcolor: alpha(e.color, 0.08) }
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: e.color, flexShrink: 0 }} />
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>{e.label}</Typography>
+                      </Box>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 800, color: e.color, lineHeight: 1 }}>
+                        {isEnquiryLoading ? <Skeleton width={28} /> : e.count}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              </CardContent>
+            </Card>
           </Stack>
         </Grid>
 
-        {/* CENTRE — Stock Age Analysis */}
-        <Grid item xs={12} md={5}>
+        {/* RIGHT — Stock Age Analysis with chart/table toggle */}
+        <Grid item xs={12} md={9}>
           <Card sx={{ ...cardShell, height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <SectionHeader icon={AccessTimeIcon} color="#8B5CF6" title="Stock Age Analysis" subtitle="Inventory age breakdown" />
-            <CardContent sx={{ px: 2, pt: 2, pb: 2, flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {/* Header with toggle */}
+            <Box sx={{ px: 3, pt: 2.5, pb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Box sx={{ width: 36, height: 36, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(135deg, #8B5CF6, ${alpha('#8B5CF6', 0.6)})`, color: '#fff' }}>
+                  <AccessTimeIcon sx={{ fontSize: 20 }} />
+                </Box>
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>Stock Age Analysis</Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Inventory age breakdown</Typography>
+                </Box>
+              </Box>
+              <ToggleButtonGroup
+                value={stockAgeView} exclusive onChange={(_, v) => { if (v) setStockAgeView(v); }} size="small"
+                sx={{
+                  '& .MuiToggleButton-root': { borderRadius: 1.5, px: 1.5, py: 0.5, textTransform: 'none', fontWeight: 600, fontSize: '0.8rem', gap: 0.5 },
+                  '& .Mui-selected': { bgcolor: `${alpha('#8B5CF6', 0.1)} !important`, color: '#8B5CF6 !important' }
+                }}
+              >
+                <ToggleButton value="chart"><BarChartIcon sx={{ fontSize: 16 }} /> Chart</ToggleButton>
+                <ToggleButton value="table"><TableChartIcon sx={{ fontSize: 16 }} /> Table</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+
+            <CardContent sx={{ px: 3, pt: 2, pb: 2, flex: 1, display: 'flex', flexDirection: 'column' }}>
               {stockAgeData.every((b) => b.count === 0) ? (
                 <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 6 }}>
                   No active stock data available
                 </Typography>
-              ) : (
+              ) : stockAgeView === 'chart' ? (
                 <>
-                  <Box sx={{ width: '100%', flex: 1, minHeight: 200 }}>
+                  <Box sx={{ width: '100%', flex: 1, minHeight: 220 }}>
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={stockAgeData} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+                      <BarChart data={stockAgeData} layout="vertical" margin={{ top: 5, right: 24, left: 10, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={alpha('#000', 0.06)} />
-                        <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: theme.palette.text.secondary }} allowDecimals={false} />
-                        <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} width={85} tick={{ fontSize: 10, fontWeight: 500, fill: theme.palette.text.secondary }} />
+                        <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: theme.palette.text.secondary }} allowDecimals={false} />
+                        <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} width={95} tick={{ fontSize: 11, fontWeight: 500, fill: theme.palette.text.secondary }} />
                         <Tooltip
                           content={({ active, payload, label }) => {
                             if (!active || !payload?.length) return null;
@@ -628,7 +623,7 @@ const Dashboard = () => {
                           }}
                           cursor={{ fill: alpha('#8B5CF6', 0.06) }}
                         />
-                        <Bar dataKey="count" barSize={20} radius={[0, 8, 8, 0]}>
+                        <Bar dataKey="count" barSize={24} radius={[0, 8, 8, 0]}>
                           {stockAgeData.map((entry, index) => (
                             <Cell key={index} fill={entry.color} />
                           ))}
@@ -636,39 +631,64 @@ const Dashboard = () => {
                       </BarChart>
                     </ResponsiveContainer>
                   </Box>
-                  {/* Compact legend row */}
-                  <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
+                  <Stack direction="row" spacing={1.5} sx={{ mt: 1.5, flexWrap: 'wrap', justifyContent: 'center' }}>
                     {stockAgeData.map((b) => (
-                      <Box key={b.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Box key={b.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, px: 1.5, py: 0.5, borderRadius: 1.5, border: '1px solid', borderColor: 'divider' }}>
                         <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: b.color, flexShrink: 0 }} />
-                        <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.65rem', color: 'text.secondary' }}>
-                          {b.count} &middot; {b.label}
-                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.7rem' }}>{b.count}</Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>{b.label}</Typography>
                       </Box>
                     ))}
                   </Stack>
                 </>
+              ) : (
+                /* Table view */
+                <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
+                  <Table>
+                    <TableHead>
+                      <TableRow sx={{ background: `linear-gradient(135deg, ${alpha('#8B5CF6', 0.08)}, ${alpha('#8B5CF6', 0.03)})`, '& .MuiTableCell-root': { fontWeight: 700, fontSize: '0.8rem', color: 'text.primary', letterSpacing: '0.02em', py: 1.5 } }}>
+                        <TableCell>Age Bucket</TableCell>
+                        <TableCell align="right">Vehicles</TableCell>
+                        <TableCell align="right">Total Value</TableCell>
+                        <TableCell align="right">Avg. Value</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {stockAgeData.map((bucket) => (
+                        <TableRow
+                          key={bucket.label}
+                          sx={{
+                            '&:hover': { bgcolor: alpha('#8B5CF6', 0.05) },
+                            transition: 'background-color 0.15s ease',
+                            '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem' }
+                          }}
+                        >
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: bucket.color, flexShrink: 0 }} />
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>{bucket.label}</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>{bucket.count}</TableCell>
+                          <TableCell align="right">{GBP(bucket.value)}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600, color: bucket.color }}>{GBP(bucket.count > 0 ? bucket.value / bucket.count : 0)}</TableCell>
+                        </TableRow>
+                      ))}
+                      {/* Totals footer */}
+                      <TableRow sx={{ bgcolor: alpha('#8B5CF6', 0.06), '& .MuiTableCell-root': { py: 1.5, fontWeight: 700, borderTop: '2px solid', borderColor: 'divider' } }}>
+                        <TableCell>Total</TableCell>
+                        <TableCell align="right">{stockAgeData.reduce((s, b) => s + b.count, 0)}</TableCell>
+                        <TableCell align="right">{GBP(stockAgeData.reduce((s, b) => s + b.value, 0))}</TableCell>
+                        <TableCell align="right">
+                          {(() => { const tot = stockAgeData.reduce((s, b) => s + b.count, 0); const val = stockAgeData.reduce((s, b) => s + b.value, 0); return GBP(tot > 0 ? val / tot : 0); })()}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
               )}
             </CardContent>
           </Card>
-        </Grid>
-
-        {/* RIGHT — Enquiry Status (vertically stacked) */}
-        <Grid item xs={12} md={4}>
-          <Box sx={{ mb: 1.5 }}>
-            <Typography variant="h6" sx={sectionTitle}>Enquiry Status</Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Click a card to view details</Typography>
-          </Box>
-          <Stack spacing={2}>
-            {enquiryStats.map((e) => (
-              <EnquiryCard
-                key={e.label}
-                {...e}
-                isLoading={isEnquiryLoading}
-                onClick={() => navigate('/enquiry', e.navState ? { state: e.navState } : undefined)}
-              />
-            ))}
-          </Stack>
         </Grid>
       </Grid>
 
@@ -730,7 +750,7 @@ const Dashboard = () => {
             <Tab label="Overhead by Type" />
           </Tabs>
 
-          {(tabValue === 0 || tabValue === 1) && (
+          {tabValue <= 2 && (
             <ToggleButtonGroup
               value={viewType} exclusive onChange={handleViewChange} size="small"
               sx={{
@@ -746,7 +766,7 @@ const Dashboard = () => {
 
         <CardContent sx={{ px: 3, pt: 3, pb: 3 }}>
           {/* Bar Chart */}
-          {((tabValue === 2 || viewType === 'chart') && tabValue !== 3) && (
+          {(viewType === 'chart' && tabValue <= 2) && (
             <Box sx={{ width: '100%', height: { xs: 300, md: 400 } }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 24, right: 12, left: 0, bottom: 5 }}>
@@ -862,6 +882,51 @@ const Dashboard = () => {
                   </FormControl>
                 </Box>
                 <Pagination count={totalOverheadsPages} page={overheadsPage} onChange={(_, p) => setOverheadsPage(p)} color="primary" size="small" sx={{ '& .MuiPaginationItem-root': { borderRadius: 1.5, fontWeight: 600, minWidth: 32, height: 32 } }} />
+              </Box>
+            </>
+          )}
+
+          {/* Cost Table */}
+          {tabValue === 2 && viewType === 'table' && (
+            <>
+              <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
+                <Table sx={{ minWidth: 650 }}>
+                  <TableHead>
+                    <TableRow sx={{ background: `linear-gradient(135deg, ${alpha(chartBarColor, 0.08)}, ${alpha(chartBarColor, 0.03)})`, '& .MuiTableCell-root': { fontWeight: 700, fontSize: '0.8rem', color: 'text.primary', letterSpacing: '0.02em', py: 1.5 } }}>
+                      <TableCell>Month</TableCell>
+                      <TableCell align="right">Entries</TableCell>
+                      <TableCell align="right">Total Cost</TableCell>
+                      <TableCell align="right">Avg. Cost</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {monthWiseCost.length === 0 ? (
+                      <TableRow><TableCell colSpan={4} align="center" sx={{ py: 6, color: 'text.secondary' }}>No data available</TableCell></TableRow>
+                    ) : (
+                      paginatedMonthCost.map((row, idx) => (
+                        <TableRow key={idx} sx={{ '&:nth-of-type(even)': { bgcolor: alpha(chartBarColor, 0.02) }, '&:hover': { bgcolor: alpha(chartBarColor, 0.05) }, transition: 'background-color 0.15s ease', '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem' } }}>
+                          <TableCell sx={{ fontWeight: 600 }}>{row.month}</TableCell>
+                          <TableCell align="right">{row.count}</TableCell>
+                          <TableCell align="right">{GBP(row.total)}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>{GBP(row.count > 0 ? row.total / row.count : 0)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, px: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>Show:</Typography>
+                  <FormControl size="small">
+                    <Select value={costRowsPerPage} onChange={(e) => { setCostRowsPerPage(parseInt(e.target.value, 10)); setCostPage(1); }} sx={{ minWidth: 64, borderRadius: 1.5, fontSize: '0.85rem' }}>
+                      <MenuItem value={5}>5</MenuItem>
+                      <MenuItem value={10}>10</MenuItem>
+                      <MenuItem value={25}>25</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+                <Pagination count={totalCostPages} page={costPage} onChange={(_, p) => setCostPage(p)} color="primary" size="small" sx={{ '& .MuiPaginationItem-root': { borderRadius: 1.5, fontWeight: 600, minWidth: 32, height: 32 } }} />
               </Box>
             </>
           )}
