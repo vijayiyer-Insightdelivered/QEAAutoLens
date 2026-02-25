@@ -33,6 +33,19 @@ var metroTxnSimple = regexp.MustCompile(
 	`^(\d{1,2}/\d{1,2}/\d{2,4})\s+(.+?)\s+([\d,]+\.\d{2})\s*$`,
 )
 
+// Text-date variants: DD Mon YYYY (e.g., "01 SEP 2025", "5 Sep 2025")
+// Metro Bank business statements use this format instead of DD/MM/YYYY.
+const metroTextDateGroup = `(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})`
+
+var metroTxnPatternText = regexp.MustCompile(
+	`(?i)^` + metroTextDateGroup + `\s+(.+?)` +
+		`\s+([\d,]+\.\d{2})?\s*([\d,]+\.\d{2})?\s+([\d,]+\.\d{2})\s*$`,
+)
+
+var metroTxnSimpleText = regexp.MustCompile(
+	`(?i)^` + metroTextDateGroup + `\s+(.+?)\s+([\d,]+\.\d{2})\s*$`,
+)
+
 func (p *MetroBankParser) Parse(pages []string) (*models.StatementInfo, error) {
 	info := &models.StatementInfo{
 		Bank: models.BankMetro,
@@ -46,19 +59,21 @@ func (p *MetroBankParser) Parse(pages []string) (*models.StatementInfo, error) {
 	info.AccountHolder = extractNameNearLabel(allText, []string{"Account holder", "Account name", "Mr ", "Mrs ", "Ms "})
 	info.StatementPeriod = extractPeriod(allText)
 
+	var lastBalance float64
 	for _, page := range pages {
 		lines := strings.Split(page, "\n")
-		txns := p.parseLines(lines)
+		txns, newBalance := p.parseLines(lines, lastBalance)
 		info.Transactions = append(info.Transactions, txns...)
+		lastBalance = newBalance
 	}
 
 	return info, nil
 }
 
-func (p *MetroBankParser) parseLines(lines []string) []models.Transaction {
+func (p *MetroBankParser) parseLines(lines []string, initialBalance float64) ([]models.Transaction, float64) {
 	var transactions []models.Transaction
 	inTransactionSection := false
-	var lastBalance float64
+	lastBalance := initialBalance
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
@@ -84,62 +99,45 @@ func (p *MetroBankParser) parseLines(lines []string) []models.Transaction {
 			inTransactionSection = true
 		}
 
-		// Try full pattern first
-		if m := metroTxnPattern.FindStringSubmatch(line); m != nil {
-			txn := models.Transaction{
-				Date:        m[1],
-				Description: strings.TrimSpace(m[2]),
-			}
+		// Strip leading OCR noise (non-digit punctuation) for pattern matching.
+		// Real transaction lines start with a date digit; stray characters like
+		// apostrophes or asterisks are common OCR artifacts.
+		matchLine := line
+		for len(matchLine) > 0 && matchLine[0] != ' ' && (matchLine[0] < '0' || matchLine[0] > '9') {
+			matchLine = matchLine[1:]
+		}
+		matchLine = strings.TrimSpace(matchLine)
 
-			paidOut := strings.TrimSpace(m[3])
-			paidIn := strings.TrimSpace(m[4])
-			balance := strings.TrimSpace(m[5])
-
-			if paidOut != "" && paidIn != "" {
-				// All three amount columns present — paid out is unambiguous
-				amt, _ := parseAmount(paidOut)
-				txn.Amount = amt
-				txn.Type = "DEBIT"
-				txn.Balance, _ = parseAmount(balance)
-			} else if paidOut != "" {
-				// Only one amount column + balance.
-				// The regex always puts the first number in group 3 (paidOut),
-				// so we cannot tell from the regex alone whether this is
-				// paid out or paid in. Use balance progression to decide.
-				amt, _ := parseAmount(paidOut)
-				bal, _ := parseAmount(balance)
-				txn.Amount = amt
-				txn.Balance = bal
-				txn.Type = classifyByBalance(amt, bal, lastBalance, txn.Description)
-			} else if paidIn != "" {
-				amt, _ := parseAmount(paidIn)
-				txn.Amount = amt
-				txn.Type = "CREDIT"
-				txn.Balance, _ = parseAmount(balance)
-			}
-
+		// Try full pattern first (slash dates: DD/MM/YYYY)
+		if m := metroTxnPattern.FindStringSubmatch(matchLine); m != nil {
+			txn := p.buildFullTxn(m, lastBalance)
 			if txn.Balance != 0 {
 				lastBalance = txn.Balance
 			}
-
 			transactions = append(transactions, txn)
 			continue
 		}
 
-		// Try simpler pattern (just date, description, one amount)
-		if m := metroTxnSimple.FindStringSubmatch(line); m != nil {
-			txn := models.Transaction{
-				Date:        m[1],
-				Description: strings.TrimSpace(m[2]),
+		// Try full pattern (text dates: DD Mon YYYY)
+		if m := metroTxnPatternText.FindStringSubmatch(matchLine); m != nil {
+			txn := p.buildFullTxn(m, lastBalance)
+			if txn.Balance != 0 {
+				lastBalance = txn.Balance
 			}
-			amt, _ := parseAmount(m[3])
-			txn.Amount = amt
-			// Heuristic: if description suggests payment/debit
-			if isDebitDescription(txn.Description) {
-				txn.Type = "DEBIT"
-			} else {
-				txn.Type = "CREDIT"
-			}
+			transactions = append(transactions, txn)
+			continue
+		}
+
+		// Try simpler pattern (slash dates, just date + description + one amount)
+		if m := metroTxnSimple.FindStringSubmatch(matchLine); m != nil {
+			txn := p.buildSimpleTxn(m)
+			transactions = append(transactions, txn)
+			continue
+		}
+
+		// Try simpler pattern (text dates)
+		if m := metroTxnSimpleText.FindStringSubmatch(matchLine); m != nil {
+			txn := p.buildSimpleTxn(m)
 			transactions = append(transactions, txn)
 			continue
 		}
@@ -155,7 +153,64 @@ func (p *MetroBankParser) parseLines(lines []string) []models.Transaction {
 		}
 	}
 
-	return transactions
+	return transactions, lastBalance
+}
+
+// buildFullTxn builds a Transaction from a full-pattern regex match
+// (groups: 1=date, 2=description, 3=paidOut?, 4=paidIn?, 5=balance).
+func (p *MetroBankParser) buildFullTxn(m []string, lastBalance float64) models.Transaction {
+	txn := models.Transaction{
+		Date:        m[1],
+		Description: strings.TrimSpace(m[2]),
+	}
+
+	paidOut := strings.TrimSpace(m[3])
+	paidIn := strings.TrimSpace(m[4])
+	balance := strings.TrimSpace(m[5])
+
+	if paidOut != "" && paidIn != "" {
+		// All three amount columns present — paid out is unambiguous
+		amt, _ := parseAmount(paidOut)
+		txn.Amount = amt
+		txn.Type = "DEBIT"
+		txn.Balance, _ = parseAmount(balance)
+	} else if paidOut != "" {
+		// Only one amount column + balance.
+		// The regex always puts the first number in group 3 (paidOut),
+		// so we cannot tell from the regex alone whether this is
+		// paid out or paid in. Use balance progression to decide.
+		amt, _ := parseAmount(paidOut)
+		bal, _ := parseAmount(balance)
+		txn.Amount = amt
+		txn.Balance = bal
+		txn.Type = classifyByBalance(amt, bal, lastBalance, txn.Description)
+	} else if paidIn != "" {
+		amt, _ := parseAmount(paidIn)
+		txn.Amount = amt
+		txn.Type = "CREDIT"
+		txn.Balance, _ = parseAmount(balance)
+	}
+
+	return txn
+}
+
+// buildSimpleTxn builds a Transaction from a simple-pattern regex match
+// (groups: 1=date, 2=description, 3=amount).
+func (p *MetroBankParser) buildSimpleTxn(m []string) models.Transaction {
+	txn := models.Transaction{
+		Date:        m[1],
+		Description: strings.TrimSpace(m[2]),
+	}
+	amt, _ := parseAmount(m[3])
+	txn.Amount = amt
+	if isCreditDescription(txn.Description) {
+		txn.Type = "CREDIT"
+	} else if isDebitDescription(txn.Description) {
+		txn.Type = "DEBIT"
+	} else {
+		txn.Type = "CREDIT"
+	}
+	return txn
 }
 
 // classifyByBalance determines whether a transaction is DEBIT or CREDIT
@@ -181,7 +236,12 @@ func classifyByBalance(amt, bal, prevBal float64, desc string) string {
 		}
 	}
 
-	// No usable previous balance — fall back to description heuristic
+	// No usable previous balance — fall back to description heuristic.
+	// Check credit keywords first since "payment" is a broad debit keyword
+	// that would incorrectly match "Inward Payment" (a credit).
+	if isCreditDescription(desc) {
+		return "CREDIT"
+	}
 	if isDebitDescription(desc) {
 		return "DEBIT"
 	}
@@ -258,9 +318,11 @@ func isSummaryLine(line string) bool {
 func extractNameNearLabel(text string, labels []string) string {
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
+		lowerLine := strings.ToLower(line)
 		for _, label := range labels {
-			if idx := strings.Index(line, label); idx >= 0 {
-				rest := strings.TrimSpace(line[idx+len(label):])
+			lowerLabel := strings.ToLower(label)
+			if idx := strings.Index(lowerLine, lowerLabel); idx >= 0 {
+				rest := strings.TrimSpace(line[idx+len(lowerLabel):])
 				// Take the rest of the line as the name, up to common delimiters
 				if colonIdx := strings.Index(rest, ":"); colonIdx == 0 {
 					rest = strings.TrimSpace(rest[1:])
@@ -280,7 +342,8 @@ func extractPeriod(text string) string {
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
 		lower := strings.ToLower(line)
-		if strings.Contains(lower, "statement period") || strings.Contains(lower, "period") {
+		if strings.Contains(lower, "statement period") || strings.Contains(lower, "period") ||
+			strings.Contains(lower, "from:") {
 			// Try to find date range
 			dates := datePatternSlash.FindAllString(line, 2)
 			if len(dates) == 2 {

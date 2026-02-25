@@ -229,6 +229,176 @@ Balance brought forward 2,000.00
 	}
 }
 
+func TestMetroBankParser_TextDateFormat(t *testing.T) {
+	p := &MetroBankParser{}
+
+	// Real-world Metro Bank business statement format:
+	// - Text dates (DD MMM YYYY) instead of DD/MM/YYYY
+	// - "Money out (£)" / "Money in (£)" column headers
+	// - Multi-line descriptions (description continues on next line)
+	// - "ACCOUNT NAME:" label in uppercase
+	pages := []string{
+		`Business Bank Account Statement
+BIC: MYMBGB2L IBAN: GB45MYMB23058056354379
+
+ACCOUNT NAME: AURORA CAR SALES LTD
+
+From: 01 SEP 2025 To: 30 SEP 2025 Account number 56354379
+Opening balance £7,225.15 Sort code 23-05-80
+
+Date Transaction Money out (£) Money in (£) Balance (£)
+
+Balance brought forward 7,225.15
+
+01 SEP 2025 Inward Payment 12,495.00 19,720.15
+sd vehicles
+
+02 SEP 2025 Outward Faster Payment SD VEHICLES 1.00 19,719.15
+NA
+
+02 SEP 2025 Outward Faster Payment SD VEHICLES 8,435.00 11,284.15
+NA
+
+04 SEP 2025 Outward Faster Payment MR Benjamin Hamer 1.00 11,283.15
+NA
+
+04 SEP 2025 Outward Faster Payment MR Benjamin Hamer 10,498.00 785.15
+NA`,
+		`Statement number 4
+Business Bank Account number 56354379
+Sort code 23-05-80
+
+Date Transaction Money out (£) Money in (£) Balance (£)
+
+05 SEP 2025 Inward Payment 15,995.00 16,780.15
+sd vehicles
+
+05 SEP 2025 Outward Faster Payment McMillan Alloys Ltd 744.00 16,036.15
+NA
+
+26 SEP 2025 Internet Banking Chgs 5.00 16,031.15
+
+26 SEP 2025 Transaction Charges 6.30 16,024.85
+
+26 SEP 2025 Account Maintenance Fee 8.00 16,016.85`,
+	}
+
+	info, err := p.Parse(pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Metadata checks
+	if info.AccountNumber != "56354379" {
+		t.Errorf("account number: got %q, want %q", info.AccountNumber, "56354379")
+	}
+	if info.SortCode != "23-05-80" {
+		t.Errorf("sort code: got %q, want %q", info.SortCode, "23-05-80")
+	}
+	if info.AccountHolder != "AURORA CAR SALES LTD" {
+		t.Errorf("account holder: got %q, want %q", info.AccountHolder, "AURORA CAR SALES LTD")
+	}
+
+	// Should parse all 10 transactions across both pages
+	// Page 1: 5 txns (01 SEP inward, 02 SEP outward x2, 04 SEP outward x2)
+	// Page 2: 5 txns (05 SEP inward, 05 SEP outward, 26 SEP x3 charges)
+	if len(info.Transactions) != 10 {
+		t.Fatalf("transactions: got %d, want 10; parsed transactions: %+v", len(info.Transactions), info.Transactions)
+	}
+
+	// Verify first transaction: Inward Payment (credit)
+	txn := info.Transactions[0]
+	if txn.Amount != 12495.00 {
+		t.Errorf("txn[0].Amount: got %f, want %f", txn.Amount, 12495.00)
+	}
+	if txn.Type != "CREDIT" {
+		t.Errorf("txn[0].Type: got %q, want %q", txn.Type, "CREDIT")
+	}
+	if txn.Balance != 19720.15 {
+		t.Errorf("txn[0].Balance: got %f, want %f", txn.Balance, 19720.15)
+	}
+
+	// Verify second transaction: Outward Faster Payment (debit)
+	txn = info.Transactions[1]
+	if txn.Amount != 1.00 {
+		t.Errorf("txn[1].Amount: got %f, want %f", txn.Amount, 1.00)
+	}
+	if txn.Type != "DEBIT" {
+		t.Errorf("txn[1].Type: got %q, want %q", txn.Type, "DEBIT")
+	}
+	if txn.Balance != 19719.15 {
+		t.Errorf("txn[1].Balance: got %f, want %f", txn.Balance, 19719.15)
+	}
+
+	// Verify page 2 first transaction: Inward Payment (credit)
+	txn = info.Transactions[5]
+	if txn.Amount != 15995.00 {
+		t.Errorf("txn[5].Amount: got %f, want %f", txn.Amount, 15995.00)
+	}
+	if txn.Type != "CREDIT" {
+		t.Errorf("txn[5].Type: got %q, want %q", txn.Type, "CREDIT")
+	}
+
+	// Verify charges appear as transactions (Internet Banking Chgs)
+	txn = info.Transactions[7]
+	if txn.Amount != 5.00 {
+		t.Errorf("txn[7].Amount: got %f, want %f", txn.Amount, 5.00)
+	}
+	if txn.Type != "DEBIT" {
+		t.Errorf("txn[7].Type: got %q, want %q", txn.Type, "DEBIT")
+	}
+}
+
+func TestMetroBankParser_TextDateUppercaseMonth(t *testing.T) {
+	p := &MetroBankParser{}
+
+	// Verify uppercase month names (SEP, OCT, etc.) are handled
+	pages := []string{
+		`Date Transaction Money out Money in Balance
+Balance brought forward 1,000.00
+01 SEP 2025 CARD PURCHASE TESCO 50.00 950.00
+15 OCT 2025 FASTER PAYMENT RECEIVED 500.00 1,450.00
+03 NOV 2025 DIRECT DEBIT SKY 30.00 1,420.00`,
+	}
+
+	info, err := p.Parse(pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(info.Transactions) != 3 {
+		t.Fatalf("transactions: got %d, want 3", len(info.Transactions))
+	}
+
+	tests := []struct {
+		idx     int
+		date    string
+		amount  float64
+		typ     string
+		balance float64
+	}{
+		{0, "01 SEP 2025", 50.00, "DEBIT", 950.00},
+		{1, "15 OCT 2025", 500.00, "CREDIT", 1450.00},
+		{2, "03 NOV 2025", 30.00, "DEBIT", 1420.00},
+	}
+
+	for _, tt := range tests {
+		txn := info.Transactions[tt.idx]
+		if txn.Date != tt.date {
+			t.Errorf("txn[%d].Date: got %q, want %q", tt.idx, txn.Date, tt.date)
+		}
+		if txn.Amount != tt.amount {
+			t.Errorf("txn[%d].Amount: got %f, want %f", tt.idx, txn.Amount, tt.amount)
+		}
+		if txn.Type != tt.typ {
+			t.Errorf("txn[%d].Type: got %q, want %q", tt.idx, txn.Type, tt.typ)
+		}
+		if txn.Balance != tt.balance {
+			t.Errorf("txn[%d].Balance: got %f, want %f", tt.idx, txn.Balance, tt.balance)
+		}
+	}
+}
+
 func TestClassifyByBalance(t *testing.T) {
 	tests := []struct {
 		name    string
