@@ -41,7 +41,8 @@ import MainCard from '@components/MainCard';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import dayjs from 'dayjs';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import useAuth from '@hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 
@@ -264,10 +265,19 @@ const Dashboard = () => {
   const [overheadsPage, setOverheadsPage] = useState(1);
   const [overheadsRowsPerPage, setOverheadsRowsPerPage] = useState(getInitialOverheadsRowsPerPage());
 
+  // Sales pagination
+  const getInitialSalesRowsPerPage = () => {
+    const stored = localStorage.getItem('salesRowsPerPage');
+    return stored ? parseInt(stored, 10) : 10;
+  };
+  const [salesPage, setSalesPage] = useState(1);
+  const [salesRowsPerPage, setSalesRowsPerPage] = useState(getInitialSalesRowsPerPage());
+
   const handleTabChange = (_, newValue) => {
     setTabValue(newValue);
     setChartType(['sales', 'overheads', 'cost'][newValue]);
     setChartYear(null);
+    setViewType('chart');
   };
 
   const handleViewChange = (_, newView) => {
@@ -441,6 +451,66 @@ const Dashboard = () => {
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([, val]) => val);
   }, [overheadskData]);
 
+  // Month-wise sales for table view
+  const monthWiseSales = useMemo(() => {
+    const src = Array.isArray(salesData) && salesData.length ? salesData : Array.isArray(saleskData) ? saleskData : [];
+    if (!src.length) return [];
+    const grouped = {};
+    src.forEach((sale) => {
+      const d = parseDateSafe(sale.sale_date);
+      if (!d) return;
+      const key = d.format('YYYY-MM');
+      if (!grouped[key]) grouped[key] = { month: d.format('MMM YYYY'), count: 0, total: 0 };
+      grouped[key].count += 1;
+      grouped[key].total += parseFloat(sale.sold_price || 0);
+    });
+    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([, val]) => val);
+  }, [salesData, saleskData]);
+
+  // Sales pagination persistence
+  useEffect(() => {
+    try { localStorage.setItem('salesRowsPerPage', String(salesRowsPerPage)); } catch {}
+  }, [salesRowsPerPage]);
+
+  const totalSalesPages = Math.max(1, Math.ceil((monthWiseSales?.length || 0) / (salesRowsPerPage || 1)));
+  const paginatedMonthSales = (monthWiseSales || []).slice(
+    (salesPage - 1) * salesRowsPerPage,
+    salesPage * salesRowsPerPage
+  );
+
+  // Stock Age Analysis — bucket active stock by days in inventory
+  const AGE_BUCKETS = [
+    { label: '0–30 days', min: 0, max: 30, color: '#10B981' },
+    { label: '31–60 days', min: 31, max: 60, color: '#3B82F6' },
+    { label: '61–90 days', min: 61, max: 90, color: '#F59E0B' },
+    { label: '91–120 days', min: 91, max: 120, color: '#F97316' },
+    { label: '120+ days', min: 121, max: Infinity, color: '#EF4444' }
+  ];
+
+  const stockAgeData = useMemo(() => {
+    const activeStock = (stockData || []).filter((d) => d.status == 1);
+    if (!activeStock.length) return AGE_BUCKETS.map((b) => ({ ...b, count: 0, value: 0 }));
+
+    const today = dayjs();
+    const buckets = AGE_BUCKETS.map((b) => ({ ...b, count: 0, value: 0 }));
+
+    activeStock.forEach((item) => {
+      // Try common date fields for when the vehicle entered stock
+      const raw = item.purchase_date || item.stock_in_date || item.stock_date || item.date || item.created_at;
+      const d = parseDateSafe(raw);
+      const days = d ? today.diff(d, 'day') : null;
+      // If no date available, put into 120+ bucket as unknown age
+      const age = days !== null ? days : Infinity;
+      const bucket = buckets.find((b) => age >= b.min && age <= b.max);
+      if (bucket) {
+        bucket.count += 1;
+        bucket.value += parseFloat(item.purchase_price || 0);
+      }
+    });
+
+    return buckets;
+  }, [stockData]);
+
   useEffect(() => {
     try { localStorage.setItem('overheadsRowsPerPage', String(overheadsRowsPerPage)); } catch {}
   }, [overheadsRowsPerPage]);
@@ -604,7 +674,7 @@ const Dashboard = () => {
             <Tab label="Cost" />
           </Tabs>
 
-          {tabValue === 1 && (
+          {(tabValue === 0 || tabValue === 1) && (
             <ToggleButtonGroup
               value={viewType}
               exclusive
@@ -634,7 +704,7 @@ const Dashboard = () => {
 
         <CardContent sx={{ px: 3, pt: 3, pb: 3 }}>
           {/* Bar Chart */}
-          {(tabValue !== 1 || viewType === 'chart') && (
+          {(tabValue === 2 || viewType === 'chart') && (
             <Box sx={{ width: '100%', height: { xs: 300, md: 400 } }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 24, right: 12, left: 0, bottom: 5 }}>
@@ -682,6 +752,90 @@ const Dashboard = () => {
                 </BarChart>
               </ResponsiveContainer>
             </Box>
+          )}
+
+          {/* Sales Table */}
+          {tabValue === 0 && viewType === 'table' && (
+            <>
+              <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
+                <Table sx={{ minWidth: 650 }}>
+                  <TableHead>
+                    <TableRow
+                      sx={{
+                        background: `linear-gradient(135deg, ${alpha(chartBarColor, 0.08)}, ${alpha(chartBarColor, 0.03)})`,
+                        '& .MuiTableCell-root': { fontWeight: 700, fontSize: '0.8rem', color: 'text.primary', letterSpacing: '0.02em', py: 1.5 }
+                      }}
+                    >
+                      <TableCell>Month</TableCell>
+                      <TableCell align="right">Vehicles Sold</TableCell>
+                      <TableCell align="right">Total Revenue</TableCell>
+                      <TableCell align="right">Avg. Sale Price</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {monthWiseSales.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                          No data available
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      paginatedMonthSales.map((row, idx) => (
+                        <TableRow
+                          key={idx}
+                          sx={{
+                            '&:nth-of-type(even)': { bgcolor: alpha(chartBarColor, 0.02) },
+                            '&:hover': { bgcolor: alpha(chartBarColor, 0.05) },
+                            transition: 'background-color 0.15s ease',
+                            '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem' }
+                          }}
+                        >
+                          <TableCell sx={{ fontWeight: 600 }}>{row.month}</TableCell>
+                          <TableCell align="right">{row.count}</TableCell>
+                          <TableCell align="right">{GBP(row.total)}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>{GBP(row.count > 0 ? row.total / row.count : 0)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+
+              {/* Pagination */}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, px: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                    Show:
+                  </Typography>
+                  <FormControl size="small">
+                    <Select
+                      value={salesRowsPerPage}
+                      onChange={(e) => { setSalesRowsPerPage(parseInt(e.target.value, 10)); setSalesPage(1); }}
+                      sx={{ minWidth: 64, borderRadius: 1.5, fontSize: '0.85rem' }}
+                    >
+                      <MenuItem value={5}>5</MenuItem>
+                      <MenuItem value={10}>10</MenuItem>
+                      <MenuItem value={25}>25</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+                <Pagination
+                  count={totalSalesPages}
+                  page={salesPage}
+                  onChange={(_, p) => setSalesPage(p)}
+                  color="primary"
+                  size="small"
+                  sx={{
+                    '& .MuiPaginationItem-root': {
+                      borderRadius: 1.5,
+                      fontWeight: 600,
+                      minWidth: 32,
+                      height: 32
+                    }
+                  }}
+                />
+              </Box>
+            </>
           )}
 
           {/* Overheads Table */}
@@ -766,6 +920,155 @@ const Dashboard = () => {
                 />
               </Box>
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Stock Age Analysis ── */}
+      <Card
+        sx={{
+          mt: 4,
+          borderRadius: 3,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.08)',
+          overflow: 'hidden'
+        }}
+      >
+        <Box sx={{ px: 3, pt: 2.5, pb: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: 2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'linear-gradient(135deg, #8B5CF6, rgba(139,92,246,0.6))',
+              color: '#fff'
+            }}
+          >
+            <AccessTimeIcon sx={{ fontSize: 20 }} />
+          </Box>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+              Stock Age Analysis
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              How long current inventory has been in stock
+            </Typography>
+          </Box>
+        </Box>
+
+        <CardContent sx={{ px: 3, pt: 3, pb: 3 }}>
+          {stockAgeData.every((b) => b.count === 0) ? (
+            <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 6 }}>
+              No active stock data available
+            </Typography>
+          ) : (
+            <Grid container spacing={3}>
+              {/* Bar chart */}
+              <Grid item xs={12} md={8}>
+                <Box sx={{ width: '100%', height: 280 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stockAgeData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={alpha('#000', 0.06)} />
+                      <XAxis
+                        type="number"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 12, fill: theme.palette.text.secondary }}
+                        allowDecimals={false}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="label"
+                        axisLine={false}
+                        tickLine={false}
+                        width={100}
+                        tick={{ fontSize: 12, fontWeight: 500, fill: theme.palette.text.secondary }}
+                      />
+                      <Tooltip
+                        content={({ active, payload, label }) => {
+                          if (!active || !payload?.length) return null;
+                          const d = payload[0].payload;
+                          return (
+                            <Box
+                              sx={{
+                                bgcolor: 'background.paper',
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                borderRadius: 2,
+                                px: 2,
+                                py: 1.5,
+                                boxShadow: '0 8px 32px rgba(0,0,0,0.12)'
+                              }}
+                            >
+                              <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                                {label}
+                              </Typography>
+                              <Typography variant="body1" sx={{ fontWeight: 700, mt: 0.25 }}>
+                                {d.count} vehicle{d.count !== 1 ? 's' : ''}
+                              </Typography>
+                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                                {GBP(d.value)} total value
+                              </Typography>
+                            </Box>
+                          );
+                        }}
+                        cursor={{ fill: alpha('#8B5CF6', 0.06) }}
+                      />
+                      <Bar dataKey="count" barSize={28} radius={[0, 8, 8, 0]}>
+                        {stockAgeData.map((entry, index) => (
+                          <Cell key={index} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Grid>
+
+              {/* Summary cards */}
+              <Grid item xs={12} md={4}>
+                <Stack spacing={1.5}>
+                  {stockAgeData.map((bucket) => (
+                    <Box
+                      key={bucket.label}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1.5,
+                        p: 1.5,
+                        borderRadius: 2,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        transition: 'background-color 0.15s ease',
+                        '&:hover': { bgcolor: alpha(bucket.color, 0.04) }
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: '50%',
+                          bgcolor: bucket.color,
+                          flexShrink: 0
+                        }}
+                      />
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                          {bucket.label}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          {GBPCompact(bucket.value)}
+                        </Typography>
+                      </Box>
+                      <Typography variant="h6" sx={{ fontWeight: 800, color: bucket.color }}>
+                        {bucket.count}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              </Grid>
+            </Grid>
           )}
         </CardContent>
       </Card>
