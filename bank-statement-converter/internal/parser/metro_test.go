@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -396,6 +397,188 @@ Balance brought forward 1,000.00
 		if txn.Balance != tt.balance {
 			t.Errorf("txn[%d].Balance: got %f, want %f", tt.idx, txn.Balance, tt.balance)
 		}
+	}
+}
+
+func TestMetroBankParser_ColumnSeparatedFormat(t *testing.T) {
+	p := &MetroBankParser{}
+
+	// Simulates a page where PDF extraction outputs descriptions and amounts
+	// in separate blocks (column-separated format). This is based on real
+	// Metro Bank business statement OCR output.
+	//
+	// Balance progression (opening = 10,000.00):
+	//   +5,000 = 15,000.00 (credit: Inward Payment)
+	//   -1,000 = 14,000.00 (debit: Outward Faster Payment)
+	//   -500   = 13,500.00 (debit: Direct Debit)
+	//   +2,000 = 15,500.00 (credit: Inward Payment)
+	pages := []string{
+		`Statement number 4
+Business Bank Account number 56354379
+Sort code 23-05-80
+
+Date Transaction
+
+05 SEP 2025 Inward Payment
+sd vehicles
+05 SEP 2025 Outward Faster Payment McMillan Alloys Ltd
+NA
+08 SEP 2025 Direct Debit MR B HAMER
+09 SEP 2025 Inward Payment
+SD Vehicles
+
+Money out (£)
+1,000.00
+500.00
+
+Money in (£) Balance (£)
+5,000.00 15,000.00
+14,000.00
+13,500.00
+2,000.00 15,500.00`,
+	}
+
+	info, err := p.Parse(pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should parse 4 transactions from the column-separated format
+	if len(info.Transactions) != 4 {
+		t.Fatalf("transactions: got %d, want 4; parsed: %+v", len(info.Transactions), info.Transactions)
+	}
+
+	// Log all transactions for debugging
+	for i, txn := range info.Transactions {
+		t.Logf("  [%d] date=%q desc=%q type=%s amount=%.2f balance=%.2f",
+			i, txn.Date, txn.Description, txn.Type, txn.Amount, txn.Balance)
+	}
+
+	tests := []struct {
+		idx     int
+		date    string
+		typ     string
+		amount  float64
+		balance float64
+	}{
+		{0, "05 SEP 2025", "CREDIT", 5000.00, 15000.00},
+		{1, "05 SEP 2025", "DEBIT", 1000.00, 14000.00},
+		{2, "08 SEP 2025", "DEBIT", 500.00, 13500.00},
+		{3, "09 SEP 2025", "CREDIT", 2000.00, 15500.00},
+	}
+
+	for _, tt := range tests {
+		txn := info.Transactions[tt.idx]
+		if txn.Date != tt.date {
+			t.Errorf("txn[%d].Date: got %q, want %q", tt.idx, txn.Date, tt.date)
+		}
+		if txn.Type != tt.typ {
+			t.Errorf("txn[%d].Type: got %q, want %q", tt.idx, txn.Type, tt.typ)
+		}
+		if txn.Amount != tt.amount {
+			t.Errorf("txn[%d].Amount: got %.2f, want %.2f", tt.idx, txn.Amount, tt.amount)
+		}
+		if txn.Balance != tt.balance {
+			t.Errorf("txn[%d].Balance: got %.2f, want %.2f", tt.idx, txn.Balance, tt.balance)
+		}
+	}
+
+	// Verify multi-line descriptions were joined
+	if !strings.Contains(info.Transactions[0].Description, "sd vehicles") {
+		t.Errorf("txn[0] should include continuation 'sd vehicles': got %q", info.Transactions[0].Description)
+	}
+	if !strings.Contains(info.Transactions[3].Description, "SD Vehicles") {
+		t.Errorf("txn[3] should include continuation 'SD Vehicles': got %q", info.Transactions[3].Description)
+	}
+}
+
+func TestMetroBankParser_MixedPagesInlineAndColumn(t *testing.T) {
+	p := &MetroBankParser{}
+
+	// Tests that a multi-page statement where some pages use inline format
+	// and others use column-separated format works correctly.
+	pages := []string{
+		// Page 1: inline format (amounts on same line as descriptions)
+		`Business Bank Account Statement
+ACCOUNT NAME: AURORA CAR SALES LTD
+From: 01 SEP 2025 To: 30 SEP 2025 Account number 56354379
+Sort code 23-05-80
+
+Date Transaction Money out (£) Money in (£) Balance (£)
+
+Balance brought forward 7,225.15
+
+01 SEP 2025 Inward Payment 12,495.00 19,720.15
+sd vehicles
+
+02 SEP 2025 Outward Faster Payment SD VEHICLES 1.00 19,719.15
+NA`,
+		// Page 2: column-separated format (amounts in separate blocks)
+		`Date Transaction
+
+05 SEP 2025 Inward Payment
+sd vehicles
+05 SEP 2025 Outward Faster Payment McMillan Alloys Ltd
+NA
+
+Money out (£)
+744.00
+
+Money in (£) Balance (£)
+15,995.00 16,780.15
+16,036.15`,
+	}
+
+	info, err := p.Parse(pages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Log all transactions
+	for i, txn := range info.Transactions {
+		t.Logf("  [%d] date=%q desc=%q type=%s amount=%.2f balance=%.2f",
+			i, txn.Date, txn.Description, txn.Type, txn.Amount, txn.Balance)
+	}
+
+	// Page 1: 2 inline transactions + Page 2: 2 column-separated transactions
+	if len(info.Transactions) != 4 {
+		t.Fatalf("transactions: got %d, want 4; parsed: %+v", len(info.Transactions), info.Transactions)
+	}
+
+	// Page 1 txn 0: Inward Payment (credit, inline)
+	txn := info.Transactions[0]
+	if txn.Type != "CREDIT" {
+		t.Errorf("txn[0].Type: got %q, want CREDIT", txn.Type)
+	}
+	if txn.Amount != 12495.00 {
+		t.Errorf("txn[0].Amount: got %.2f, want 12495.00", txn.Amount)
+	}
+
+	// Page 1 txn 1: Outward Faster Payment (debit, inline)
+	txn = info.Transactions[1]
+	if txn.Type != "DEBIT" {
+		t.Errorf("txn[1].Type: got %q, want DEBIT", txn.Type)
+	}
+	if txn.Amount != 1.00 {
+		t.Errorf("txn[1].Amount: got %.2f, want 1.00", txn.Amount)
+	}
+
+	// Page 2 txn 0: Inward Payment (credit, column-separated)
+	txn = info.Transactions[2]
+	if txn.Type != "CREDIT" {
+		t.Errorf("txn[2].Type: got %q, want CREDIT", txn.Type)
+	}
+	if txn.Amount != 15995.00 {
+		t.Errorf("txn[2].Amount: got %.2f, want 15995.00", txn.Amount)
+	}
+
+	// Page 2 txn 1: Outward Faster Payment (debit, column-separated)
+	txn = info.Transactions[3]
+	if txn.Type != "DEBIT" {
+		t.Errorf("txn[3].Type: got %q, want DEBIT", txn.Type)
+	}
+	if txn.Amount != 744.00 {
+		t.Errorf("txn[3].Amount: got %.2f, want 744.00", txn.Amount)
 	}
 }
 
