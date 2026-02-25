@@ -457,6 +457,8 @@ func isCreditDescription(desc string) bool {
 		"direct credit", "credit from", "bgc ", "bacs ",
 		"refund", "interest paid",
 		"transfer from", "faster payment",
+		"inward payment", "credit", "salary", "interest payment",
+		"transfer in", "received", "bank giro",
 	}
 	for _, kw := range creditKeywords {
 		if strings.Contains(lower, kw) {
