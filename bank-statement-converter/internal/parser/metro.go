@@ -63,8 +63,18 @@ func (p *MetroBankParser) Parse(pages []string) (*models.StatementInfo, error) {
 	for _, page := range pages {
 		lines := strings.Split(page, "\n")
 		txns, newBalance := p.parseLines(lines, lastBalance)
+		if len(txns) == 0 {
+			// Inline parsing found nothing — try column-separated format.
+			// Some PDF extractors output the table columns as separate blocks:
+			//   1. Date + description lines (no amounts)
+			//   2. "Money out (£)" block with bare amounts
+			//   3. "Money in (£) Balance (£)" block with 1-2 amounts per line
+			txns, newBalance = p.parseLinesColumns(lines, lastBalance)
+		}
 		info.Transactions = append(info.Transactions, txns...)
-		lastBalance = newBalance
+		if newBalance != 0 {
+			lastBalance = newBalance
+		}
 	}
 
 	return info, nil
@@ -154,6 +164,241 @@ func (p *MetroBankParser) parseLines(lines []string, initialBalance float64) ([]
 	}
 
 	return transactions, lastBalance
+}
+
+// parseLinesColumns handles the column-separated PDF extraction format.
+// Some Metro Bank business statement pages are extracted with descriptions
+// and amounts in separate text blocks instead of on the same line:
+//
+//	Date Transaction
+//	05 SEP 2025 Inward Payment
+//	sd vehicles
+//	05 SEP 2025 Outward Faster Payment McMillan Alloys Ltd
+//	NA
+//	...
+//	Money out (£)
+//	744.00
+//	130.00
+//	...
+//	Money in (£) Balance (E£)
+//	15,995.00 16,780.15
+//	16,036.15
+//	...
+//
+// The parser uses a state machine with three phases:
+//  1. "desc" — collect date+description groups
+//  2. "money_out" — collect bare amounts (one per line)
+//  3. "money_in_bal" — collect 1-2 amounts per line (money-in+balance or balance-only)
+func (p *MetroBankParser) parseLinesColumns(lines []string, initialBalance float64) ([]models.Transaction, float64) {
+	type descEntry struct {
+		date string
+		desc string
+	}
+
+	var descs []descEntry
+	var moneyOut []float64
+	type balEntry struct {
+		moneyIn float64
+		balance float64
+	}
+	var balEntries []balEntry
+
+	state := "scan" // scan, desc, money_out, money_in_bal
+	lastBalance := initialBalance
+
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+
+		lower := strings.ToLower(line)
+
+		// Detect opening balance anywhere
+		if bal, ok := extractOpeningBalance(line); ok {
+			lastBalance = bal
+			continue
+		}
+
+		// Detect section transitions
+		if strings.Contains(lower, "money out") && !strings.Contains(lower, "total money out") {
+			state = "money_out"
+			continue
+		}
+		if strings.Contains(lower, "money in") && !strings.Contains(lower, "total money in") {
+			state = "money_in_bal"
+			continue
+		}
+
+		// Detect start of transaction table header
+		if containsTransactionHeader(line) {
+			state = "desc"
+			continue
+		}
+		// "Date Transaction" header (simpler variant)
+		if lower == "date transaction" || lower == "date transaction type" {
+			state = "desc"
+			continue
+		}
+
+		// Skip summary/footer lines in all states
+		if isSummaryLine(line) || isMetroFooter(line) {
+			continue
+		}
+
+		switch state {
+		case "scan":
+			// Before we've found a transaction header, check if a date line
+			// appears — if so, transition to desc state.
+			if startsWithDate(line) {
+				state = "desc"
+				// Fall through to desc handling below
+			} else {
+				continue
+			}
+			fallthrough
+
+		case "desc":
+			// Strip leading OCR noise
+			matchLine := line
+			for len(matchLine) > 0 && matchLine[0] != ' ' && (matchLine[0] < '0' || matchLine[0] > '9') {
+				matchLine = matchLine[1:]
+			}
+			matchLine = strings.TrimSpace(matchLine)
+
+			if startsWithDate(matchLine) {
+				// Check if this line also has amounts (inline format) — if so,
+				// skip column-separated parsing and return nothing so the
+				// caller uses inline parsing results.
+				if metroTxnPattern.MatchString(matchLine) || metroTxnPatternText.MatchString(matchLine) {
+					return nil, initialBalance
+				}
+
+				// Extract date from line
+				date := extractDate(matchLine)
+				if date == "" {
+					continue
+				}
+				// Rest after date is the description
+				idx := strings.Index(matchLine, date)
+				desc := strings.TrimSpace(matchLine[idx+len(date):])
+				descs = append(descs, descEntry{date: date, desc: desc})
+			} else if len(descs) > 0 && line != "" {
+				// Continuation line — append to last description
+				// Skip common noise lines
+				cleanLine := line
+				// Strip leading OCR noise characters
+				for len(cleanLine) > 0 && (cleanLine[0] == '\'' || cleanLine[0] == '*' || cleanLine[0] == '"') {
+					cleanLine = cleanLine[1:]
+				}
+				cleanLine = strings.TrimSpace(cleanLine)
+				if cleanLine != "" && !isSummaryLine(cleanLine) && !isMetroFooter(cleanLine) {
+					last := &descs[len(descs)-1]
+					last.desc += " " + cleanLine
+				}
+			}
+
+		case "money_out":
+			// Each line should be a bare amount
+			amt, err := parseAmount(line)
+			if err == nil && amt > 0 {
+				moneyOut = append(moneyOut, amt)
+			} else {
+				// OCR corruption or non-amount line — add 0 placeholder
+				// so indexing stays aligned
+				if !isSummaryLine(line) && !isMetroFooter(line) &&
+					!strings.Contains(lower, "money") {
+					moneyOut = append(moneyOut, 0)
+				}
+			}
+
+		case "money_in_bal":
+			// Each line has 1 or 2 amounts:
+			//   2 amounts = money_in + balance (credit transaction)
+			//   1 amount = balance only (debit transaction, amount from money_out)
+			amounts := metroAmountPattern.FindAllString(line, -1)
+			if len(amounts) >= 2 {
+				moneyIn, _ := parseAmount(amounts[0])
+				bal, _ := parseAmount(amounts[len(amounts)-1])
+				balEntries = append(balEntries, balEntry{moneyIn: moneyIn, balance: bal})
+			} else if len(amounts) == 1 {
+				bal, _ := parseAmount(amounts[0])
+				balEntries = append(balEntries, balEntry{moneyIn: 0, balance: bal})
+			} else {
+				// OCR corruption — placeholder
+				if !isSummaryLine(line) && !isMetroFooter(line) &&
+					!strings.Contains(lower, "money") && !strings.Contains(lower, "balance") {
+					balEntries = append(balEntries, balEntry{moneyIn: 0, balance: 0})
+				}
+			}
+		}
+	}
+
+	// If no descriptions found, nothing to do
+	if len(descs) == 0 {
+		return nil, initialBalance
+	}
+
+	// Merge: each balance entry maps 1:1 to a description entry.
+	// Money-out amounts are consumed in order for debit transactions.
+	var transactions []models.Transaction
+	moneyOutIdx := 0
+
+	for i, d := range descs {
+		txn := models.Transaction{
+			Date:        d.date,
+			Description: strings.TrimSpace(d.desc),
+		}
+
+		if i < len(balEntries) {
+			be := balEntries[i]
+			txn.Balance = be.balance
+			if be.moneyIn > 0 {
+				// Credit transaction
+				txn.Amount = be.moneyIn
+				txn.Type = "CREDIT"
+			} else {
+				// Debit transaction — get amount from money_out list
+				if moneyOutIdx < len(moneyOut) {
+					txn.Amount = moneyOut[moneyOutIdx]
+					moneyOutIdx++
+				}
+				txn.Type = "DEBIT"
+			}
+		} else {
+			// No balance entry for this desc — classify by description
+			if isCreditDescription(txn.Description) {
+				txn.Type = "CREDIT"
+			} else {
+				txn.Type = "DEBIT"
+			}
+		}
+
+		if txn.Balance != 0 {
+			lastBalance = txn.Balance
+		}
+		transactions = append(transactions, txn)
+	}
+
+	return transactions, lastBalance
+}
+
+// isMetroFooter detects footer/boilerplate lines in Metro Bank statements.
+func isMetroFooter(line string) bool {
+	lower := strings.ToLower(line)
+	footerKeywords := []string{
+		"registered in england", "registered in wales",
+		"financial conduct authority", "prudential regulation",
+		"metro bank plc", "metrobankonline",
+		"please check", "if you find",
+		"authorised by", "one southampton row",
+	}
+	for _, kw := range footerKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildFullTxn builds a Transaction from a full-pattern regex match
@@ -306,6 +551,8 @@ func isSummaryLine(line string) bool {
 		"opening balance", "closing balance", "total paid in",
 		"total paid out", "total payments", "total receipts",
 		"statement period", "page ", "continued",
+		"total money in", "total money out", "end balance",
+		"balance carried forward", "statement number",
 	}
 	for _, kw := range summaryKeywords {
 		if strings.Contains(lower, kw) {
