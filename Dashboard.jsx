@@ -940,8 +940,8 @@ const Dashboard = () => {
                 </Typography>
               ) : (
                 <>
-                  <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
-                    <Table sx={{ minWidth: 650 }}>
+                  <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflowX: 'auto', maxWidth: '100%' }}>
+                    <Table sx={{ minWidth: Math.max(650, 120 + overheadSummary.types.length * 130) }}>
                       <TableHead>
                         <TableRow
                           sx={{
@@ -949,7 +949,7 @@ const Dashboard = () => {
                             '& .MuiTableCell-root': { fontWeight: 700, fontSize: '0.78rem', color: 'text.primary', letterSpacing: '0.02em', py: 1.5, whiteSpace: 'nowrap' }
                           }}
                         >
-                          <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>Month</TableCell>
+                          <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 2, minWidth: 100, borderRight: '1px solid', borderColor: 'divider' }}>Month</TableCell>
                           {overheadSummary.types.map((type, i) => (
                             <TableCell key={type} align="right">
                               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.75 }}>
@@ -972,7 +972,7 @@ const Dashboard = () => {
                               '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem' }
                             }}
                           >
-                            <TableCell sx={{ fontWeight: 600, position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>{row.month}</TableCell>
+                            <TableCell sx={{ fontWeight: 600, position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 2, borderRight: '1px solid', borderColor: 'divider' }}>{row.month}</TableCell>
                             {overheadSummary.types.map((type) => (
                               <TableCell key={type} align="right">
                                 {row[type] ? GBP(row[type]) : <Typography component="span" sx={{ color: 'text.disabled', fontSize: '0.8rem' }}>&mdash;</Typography>}
@@ -983,7 +983,7 @@ const Dashboard = () => {
                         ))}
                         {/* Grand totals footer */}
                         <TableRow sx={{ bgcolor: alpha('#06B6D4', 0.06), '& .MuiTableCell-root': { py: 1.5, fontSize: '0.85rem', fontWeight: 700, borderTop: '2px solid', borderColor: 'divider' } }}>
-                          <TableCell sx={{ position: 'sticky', left: 0, bgcolor: alpha('#06B6D4', 0.06), zIndex: 1 }}>Grand Total</TableCell>
+                          <TableCell sx={{ position: 'sticky', left: 0, bgcolor: alpha('#06B6D4', 0.06), zIndex: 2, borderRight: '1px solid', borderColor: 'divider' }}>Grand Total</TableCell>
                           {overheadSummary.types.map((type) => (
                             <TableCell key={type} align="right">{GBP(overheadSummary.typeTotals[type])}</TableCell>
                           ))}
