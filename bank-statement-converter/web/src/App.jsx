@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
+import Box from '@mui/material/Box'
+import AppBar from '@mui/material/AppBar'
+import Toolbar from '@mui/material/Toolbar'
+import Typography from '@mui/material/Typography'
+import Container from '@mui/material/Container'
 import FileUpload from './components/FileUpload'
 import Results from './components/Results'
-import './App.css'
+import { BRAND } from './theme'
 
 // Configure pdf.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -143,48 +148,72 @@ function App() {
   }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="logo">
-          <div className="logo-icon">
-            <svg width="36" height="36" viewBox="0 0 120 120" fill="none">
-              <circle cx="60" cy="60" r="50" stroke="#E86E29" strokeWidth="6" fill="none" />
-              <circle cx="60" cy="60" r="20" stroke="#ffffff" strokeWidth="4" fill="none" />
-              <line x1="60" y1="10" x2="60" y2="35" stroke="#ffffff" strokeWidth="3" />
-              <line x1="60" y1="85" x2="60" y2="110" stroke="#ffffff" strokeWidth="3" />
-              <line x1="10" y1="60" x2="35" y2="60" stroke="#ffffff" strokeWidth="3" />
-              <line x1="85" y1="60" x2="110" y2="60" stroke="#ffffff" strokeWidth="3" />
-            </svg>
-          </div>
-          <div className="logo-text">
-            <span className="logo-qea">QEA</span>
-            <span className="logo-sep">/</span>
-            <span className="logo-auto">Auto</span>
-            <span className="logo-lens">Lens</span>
-          </div>
-        </div>
-        <h1>Bank Statement Converter</h1>
-        <p className="subtitle">
-          Convert PDF bank statements to CSV — Metro Bank, HSBC, Barclays
-        </p>
-      </header>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <AppBar position="static" sx={{ bgcolor: 'primary.main' }}>
+        <Toolbar sx={{ flexDirection: 'column', py: 2 }}>
+          {/* Logo */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+            <Box
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: '50%',
+                bgcolor: 'primary.dark',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <svg width="36" height="36" viewBox="0 0 120 120" fill="none">
+                <circle cx="60" cy="60" r="50" stroke={BRAND.orange} strokeWidth="6" fill="none" />
+                <circle cx="60" cy="60" r="20" stroke="#ffffff" strokeWidth="4" fill="none" />
+                <line x1="60" y1="10" x2="60" y2="35" stroke="#ffffff" strokeWidth="3" />
+                <line x1="60" y1="85" x2="60" y2="110" stroke="#ffffff" strokeWidth="3" />
+                <line x1="10" y1="60" x2="35" y2="60" stroke="#ffffff" strokeWidth="3" />
+                <line x1="85" y1="60" x2="110" y2="60" stroke="#ffffff" strokeWidth="3" />
+              </svg>
+            </Box>
+            <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
+              <span>QEA</span>
+              <span style={{ color: BRAND.midGrey, margin: '0 2px' }}>/</span>
+              <span>Auto</span>
+              <span style={{ color: BRAND.orange }}>Lens</span>
+            </Typography>
+          </Box>
+          <Typography variant="subtitle1" sx={{ fontWeight: 400, opacity: 0.9 }}>
+            Bank Statement Converter
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            Convert PDF bank statements to CSV — Metro Bank, HSBC, Barclays
+          </Typography>
+        </Toolbar>
+      </AppBar>
 
-      <main className="app-main">
+      {/* Main Content */}
+      <Container maxWidth="md" sx={{ flex: 1, py: 4 }}>
         {!result ? (
-          <FileUpload
-            onConvert={handleConvert}
-            loading={loading}
-            error={error}
-          />
+          <FileUpload onConvert={handleConvert} loading={loading} error={error} />
         ) : (
           <Results data={result} onReset={handleReset} />
         )}
-      </main>
+      </Container>
 
-      <footer className="app-footer">
-        <p>Insight Delivered — See Every Deal. Know Every Margin.</p>
-      </footer>
-    </div>
+      {/* Footer */}
+      <Box
+        component="footer"
+        sx={{
+          bgcolor: 'primary.main',
+          color: 'text.secondary',
+          textAlign: 'center',
+          py: 1.5,
+        }}
+      >
+        <Typography variant="caption">
+          Insight Delivered — See Every Deal. Know Every Margin.
+        </Typography>
+      </Box>
+    </Box>
   )
 }
 

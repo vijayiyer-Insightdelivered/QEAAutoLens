@@ -1,29 +1,4 @@
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-:root {
-  --navy: #003366;
-  --orange: #e86e29;
-  --orange-light: #f28c4e;
-  --white: #ffffff;
-  --light-grey: #f4f6f8;
-  --mid-grey: #8899aa;
-  --dark: #0a1628;
-  --font: 'Segoe UI', 'SF Pro Display', system-ui, sans-serif;
-}
-
-body {
-  font-family: var(--font);
-  background: var(--light-grey);
-  color: var(--navy);
-  min-height: 100vh;
-}
-
+/* Minimal reset — MUI CssBaseline handles the rest */
 #root {
   min-height: 100vh;
   display: flex;
