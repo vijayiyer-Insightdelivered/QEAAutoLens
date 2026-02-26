@@ -30,7 +30,7 @@ func ExtractText(filePath string) ([]string, error) {
 		return rawPages, nil
 	}
 
-	// Both Go methods failed — try external pdftotext (poppler-utils) as last resort
+	// Both Go methods failed — try external pdftotext (poppler-utils)
 	popplerPages, popplerErr := extractWithPdftotext(filePath)
 	if popplerErr == nil && isReadableText(popplerPages) {
 		return popplerPages, nil
@@ -47,7 +47,24 @@ func ExtractText(filePath string) ([]string, error) {
 		return popplerPages, nil
 	}
 
-	// All methods failed
+	// All text-extraction methods failed — the PDF is likely scanned/image-based.
+	// Try OCR as a last resort (requires pdftoppm + tesseract).
+	ocrPages, ocrErr := extractWithOCR(filePath)
+	if ocrErr == nil && isReadableText(ocrPages) {
+		return ocrPages, nil
+	}
+	// Accept lower-quality OCR output (OCR text often has noise but is still parseable)
+	if ocrErr == nil && totalTextLen(ocrPages) > 30 && textQuality(ocrPages) > 0.3 {
+		return ocrPages, nil
+	}
+
+	// All methods failed — build informative error
+	if ocrErr != nil {
+		if libErr != nil {
+			return nil, fmt.Errorf("PDF extraction failed: %v; OCR fallback also failed: %v", libErr, ocrErr)
+		}
+		return nil, fmt.Errorf("no readable text extracted from PDF; OCR fallback failed: %v (install tesseract-ocr and poppler-utils for scanned PDF support)", ocrErr)
+	}
 	if libErr != nil {
 		return nil, fmt.Errorf("PDF extraction failed: %v (the PDF may use custom fonts that cannot be decoded server-side; try using the web UI which uses browser-based extraction)", libErr)
 	}
