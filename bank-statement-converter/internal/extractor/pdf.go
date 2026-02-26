@@ -36,14 +36,15 @@ func ExtractText(filePath string) ([]string, error) {
 		return popplerPages, nil
 	}
 
-	// Return the best readable result we have (even if below threshold)
-	if totalTextLen(pages) > 0 && textQuality(pages) > 0.3 {
+	// Return the best readable result we have (even if below threshold).
+	// Require asciiRatio > 0.2 to reject garbled Unicode from bad font decoding.
+	if totalTextLen(pages) > 0 && textQuality(pages) > 0.3 && asciiRatio(pages) > 0.2 {
 		return pages, nil
 	}
-	if totalTextLen(rawPages) > 0 && textQuality(rawPages) > 0.3 {
+	if totalTextLen(rawPages) > 0 && textQuality(rawPages) > 0.3 && asciiRatio(rawPages) > 0.2 {
 		return rawPages, nil
 	}
-	if totalTextLen(popplerPages) > 0 && textQuality(popplerPages) > 0.3 {
+	if totalTextLen(popplerPages) > 0 && textQuality(popplerPages) > 0.3 && asciiRatio(popplerPages) > 0.2 {
 		return popplerPages, nil
 	}
 
@@ -96,10 +97,35 @@ func textQuality(pages []string) float64 {
 	return float64(readable) / float64(total)
 }
 
+// asciiRatio returns the ratio of ASCII alphanumeric characters (a-z, A-Z, 0-9)
+// to all non-whitespace characters. This catches garbled Unicode text that passes
+// textQuality (e.g., font-decoded garbage like Ұ, Ҁ, ۯ where unicode.IsLetter
+// returns true). Real English bank statement text scores >0.5; garbage scores <0.2.
+func asciiRatio(pages []string) float64 {
+	total := 0
+	ascii := 0
+	for _, page := range pages {
+		for _, r := range page {
+			if unicode.IsSpace(r) {
+				continue
+			}
+			total++
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				ascii++
+			}
+		}
+	}
+	if total == 0 {
+		return 0
+	}
+	return float64(ascii) / float64(total)
+}
+
 // isReadableText checks that pages contain enough text AND that it's actually
-// readable (not binary garbage). Requires >50 chars and >60% readable characters.
+// readable (not binary garbage). Requires >50 chars, >60% readable characters,
+// and >30% ASCII alphanumeric (to reject garbled Unicode from bad font decoding).
 func isReadableText(pages []string) bool {
-	return totalTextLen(pages) > 50 && textQuality(pages) > 0.6
+	return totalTextLen(pages) > 50 && textQuality(pages) > 0.6 && asciiRatio(pages) > 0.3
 }
 
 // IsReadableText is the exported version for use by other packages.
