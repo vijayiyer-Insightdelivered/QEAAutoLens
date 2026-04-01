@@ -29,7 +29,7 @@ EXCLUDED_EMAIL_DOMAINS = {
 
 EXCLUDED_EMAIL_PREFIXES = {
     'noreply', 'no-reply', 'mailer-daemon', 'postmaster',
-    'webmaster', 'hostmaster', 'abuse', 'root', 'admin',
+    'webmaster', 'hostmaster', 'abuse', 'root',
 }
 
 # File extensions that look like emails but aren't
@@ -66,11 +66,34 @@ AGGREGATOR_DOMAINS = {
 }
 
 # Domain suffixes to try for domain guessing
-DOMAIN_SUFFIXES = ['.co.uk', '.com', '.uk', '.net']
-DOMAIN_MODIFIERS = ['', 'cars', 'motors', 'autos', 'vehicles', 'automotive']
+DOMAIN_SUFFIXES = ['.co.uk', '.com', '.uk', '.net', '.org']
+DOMAIN_MODIFIERS = ['', 'cars', 'motors', 'autos', 'vehicles', 'automotive',
+                    'group', 'uk', 'auto', 'motor', 'car', 'sales',
+                    'direct', 'online', 'garage', 'dealer']
 
 # Contact page paths to check
-CONTACT_PATHS = ['/contact', '/contact-us', '/about', '/about-us', '/contactus', '/aboutus']
+CONTACT_PATHS = [
+    '/contact', '/contact-us', '/contactus', '/get-in-touch',
+    '/about', '/about-us', '/aboutus',
+    '/enquiry', '/enquiries', '/email', '/email-us',
+    '/team', '/our-team', '/staff', '/meet-the-team',
+    '/privacy', '/privacy-policy',  # often has a contact email
+    '/footer',  # some sites serve this as a partial
+]
+
+# Keywords that indicate a link leads to a contact-related page
+CONTACT_LINK_KEYWORDS = {
+    'contact', 'get in touch', 'email', 'enquir', 'reach us',
+    'talk to us', 'write to us', 'meet the team', 'our team',
+    'about us', 'about', 'staff',
+}
+
+# Obfuscated email patterns
+OBFUSCATED_EMAIL_PATTERN = re.compile(
+    r'([a-zA-Z0-9._%+-]+)\s*[\[\(]?\s*(?:at|AT|@)\s*[\]\)]?\s*'
+    r'([a-zA-Z0-9.-]+)\s*[\[\(]?\s*(?:dot|DOT|\.)\s*[\]\)]?\s*'
+    r'([a-zA-Z]{2,})',
+)
 
 # User agents
 USER_AGENTS = [
@@ -80,7 +103,7 @@ USER_AGENTS = [
 ]
 
 # Max domain guessing attempts per dealer
-MAX_DOMAIN_GUESSES = 20
+MAX_DOMAIN_GUESSES = 40
 
 # Default paths
 DEFAULT_DB_PATH = 'data/progress.db'

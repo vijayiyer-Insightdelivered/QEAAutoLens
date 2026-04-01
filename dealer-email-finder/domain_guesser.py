@@ -29,12 +29,29 @@ def guess_domain(company_name, session, rate_limiter):
 
                 try:
                     rate_limiter.wait('domain', config.RATE_LIMIT_DOMAIN_PROBE, config.JITTER_DOMAIN_PROBE)
+                    # Try HEAD first (fast), then GET if HEAD fails
                     resp = session.head(url, timeout=8, allow_redirects=True)
-                    if resp.status_code == 200:
+                    if resp.status_code in (200, 403):
                         final_url = resp.url if hasattr(resp, 'url') else url
                         log.info(f"Domain guess hit: {domain} -> {final_url}")
                         return f"https://{domain}"
+                    if resp.status_code == 405:
+                        # Server doesn't allow HEAD, try GET
+                        resp = session.get(url, timeout=8, allow_redirects=True)
+                        if resp.status_code == 200:
+                            log.info(f"Domain guess hit (GET): {domain}")
+                            return f"https://{domain}"
                 except Exception:
+                    # Try HTTP fallback for sites without HTTPS
+                    try:
+                        http_url = f"http://{domain}"
+                        resp = session.head(http_url, timeout=6, allow_redirects=True)
+                        if resp.status_code in (200, 301, 302):
+                            final = resp.headers.get('Location', http_url)
+                            log.info(f"Domain guess hit (HTTP): {domain} -> {final}")
+                            return f"https://{domain}" if 'https' in str(final) else http_url
+                    except Exception:
+                        pass
                     continue
 
     return None

@@ -48,6 +48,9 @@ def search_for_website(company_name, postcode, session, rate_limiter, search_eng
             candidates = _search_bing_all(query, session, rate_limiter)
 
         if not candidates:
+            candidates = _search_google_all(query, session, rate_limiter)
+
+        if not candidates:
             continue
 
         # Score and rank candidates by relevance to company name
@@ -102,7 +105,7 @@ def _pick_best_result(candidates, slugs, cleaned_name):
 def _try_direct_domains(slugs, session, rate_limiter):
     """Try the company name as a domain directly (e.g. insightdelivered.com)."""
     for slug in slugs:
-        for suffix in ['.com', '.co.uk', '.uk']:
+        for suffix in ['.com', '.co.uk', '.uk', '.net', '.org']:
             domain = f"{slug}{suffix}"
             url = f"https://{domain}"
             try:
@@ -135,7 +138,7 @@ def _search_duckduckgo_all(query, rate_limiter):
 
         rate_limiter.wait('search', config.RATE_LIMIT_SEARCH, config.JITTER_SEARCH)
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=10))
+            results = list(ddgs.text(query, max_results=20))
 
         candidates = []
         for r in results:
@@ -175,6 +178,39 @@ def _search_bing_all(query, session, rate_limiter):
         return candidates
     except Exception as e:
         log.warning(f"Bing search failed: {e}")
+    return []
+
+
+def _search_google_all(query, session, rate_limiter):
+    """Return all valid candidate URLs from Google search (scraping fallback)."""
+    try:
+        rate_limiter.wait('search', config.RATE_LIMIT_SEARCH, config.JITTER_SEARCH)
+        resp = session.get(
+            'https://www.google.com/search',
+            params={'q': query, 'num': 15},
+            timeout=config.REQUEST_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return []
+        soup = BeautifulSoup(resp.text, 'lxml')
+
+        candidates = []
+        seen = set()
+
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            # Google wraps URLs in /url?q=... redirects
+            if '/url?q=' in href:
+                href = href.split('/url?q=')[1].split('&')[0]
+            elif not href.startswith('http'):
+                continue
+            if _is_valid_result(href) and href not in seen:
+                candidates.append(href)
+                seen.add(href)
+
+        return candidates
+    except Exception as e:
+        log.warning(f"Google search failed: {e}")
     return []
 
 
