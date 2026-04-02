@@ -247,7 +247,7 @@ def insert_dealer(db_path=None, **fields):
     return fields['company_number']
 
 
-def get_dealers_paginated(db_path=None, page=1, per_page=50, status_filter=None, search=None):
+def get_dealers_paginated(db_path=None, page=1, per_page=50, status_filter=None, search=None, sort=None):
     """Get paginated dealer list for the dashboard."""
     db_path = db_path or config.DEFAULT_DB_PATH
     conn = sqlite3.connect(db_path)
@@ -264,6 +264,18 @@ def get_dealers_paginated(db_path=None, page=1, per_page=50, status_filter=None,
 
     where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
+    # Sorting
+    allowed_sorts = {
+        'distance_asc': 'distance_miles ASC NULLS LAST',
+        'distance_desc': 'distance_miles DESC NULLS FIRST',
+    }
+    # SQLite doesn't support NULLS LAST directly, use CASE workaround
+    sort_clauses = {
+        'distance_asc': 'CASE WHEN distance_miles IS NULL THEN 1 ELSE 0 END, distance_miles ASC',
+        'distance_desc': 'CASE WHEN distance_miles IS NULL THEN 1 ELSE 0 END, distance_miles DESC',
+    }
+    order_by = sort_clauses.get(sort, 'id DESC')
+
     # Count
     count_row = conn.execute(f"SELECT COUNT(*) FROM dealers {where}", params).fetchone()
     total = count_row[0]
@@ -271,7 +283,7 @@ def get_dealers_paginated(db_path=None, page=1, per_page=50, status_filter=None,
     # Fetch page
     offset = (page - 1) * per_page
     rows = conn.execute(
-        f"SELECT * FROM dealers {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        f"SELECT * FROM dealers {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
         params + [per_page, offset]
     ).fetchall()
 

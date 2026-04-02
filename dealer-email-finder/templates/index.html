@@ -243,6 +243,7 @@
                                 <th class="px-3 py-3 w-8"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)" class="rounded"></th>
                                 <th class="text-left px-4 py-3 font-medium text-gray-600">Company</th>
                                 <th class="text-left px-4 py-3 font-medium text-gray-600">Postcode</th>
+                                <th class="text-left px-4 py-3 font-medium text-gray-600 cursor-pointer hover:text-navy" onclick="toggleSort()" title="Click to sort by distance">Distance (mi) <span id="sort-arrow"></span></th>
                                 <th class="text-left px-4 py-3 font-medium text-gray-600">Status</th>
                                 <th class="text-left px-4 py-3 font-medium text-gray-600">Website</th>
                                 <th class="text-left px-4 py-3 font-medium text-gray-600">Emails Found</th>
@@ -251,7 +252,7 @@
                             </tr>
                         </thead>
                         <tbody id="dealers-table" class="divide-y divide-gray-100">
-                            <tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No dealers loaded. Upload an Excel file or add dealers manually.</td></tr>
+                            <tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No dealers loaded. Upload an Excel file or add dealers manually.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -385,12 +386,23 @@ function updateEngineStatus(status, dealer) {
     }
 }
 
+let currentSort = '';
+
+function toggleSort() {
+    if (currentSort === 'distance_asc') currentSort = 'distance_desc';
+    else currentSort = 'distance_asc';
+    const arrow = document.getElementById('sort-arrow');
+    arrow.textContent = currentSort === 'distance_asc' ? '\u2191' : '\u2193';
+    loadDealers(1);
+}
+
 async function loadDealers(page) {
     if (page < 1) return;
     currentPage = page;
     const search = document.getElementById('search-input').value;
     const status = document.getElementById('status-filter').value;
     const params = new URLSearchParams({ page, per_page: 50, status, search });
+    if (currentSort) params.set('sort', currentSort);
     try {
         const res = await fetch('/api/dealers?' + params);
         const data = await res.json();
@@ -412,7 +424,7 @@ let totalFilteredCount = 0;
 function renderTable(dealers) {
     const tbody = document.getElementById('dealers-table');
     if (!dealers.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-gray-400">No dealers found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No dealers found.</td></tr>';
         return;
     }
     tbody.innerHTML = dealers.map(d => {
@@ -431,6 +443,7 @@ function renderTable(dealers) {
                 <div class="text-xs text-gray-400">#${esc(d.company_number)}</div>
             </td>
             <td class="px-4 py-3 text-xs">${esc(d.postcode || '-')}</td>
+            <td class="px-4 py-3 text-xs">${d.distance_miles != null ? Number(d.distance_miles).toFixed(1) : '-'}</td>
             <td class="px-4 py-3"><span class="status-${d.status} text-xs font-medium">${d.status}</span></td>
             <td class="px-4 py-3">${website}</td>
             <td class="px-4 py-3">${emailStr}</td>

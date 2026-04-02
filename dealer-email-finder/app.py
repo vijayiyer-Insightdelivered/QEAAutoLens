@@ -127,11 +127,13 @@ async def get_dealers(
     per_page: int = Query(50, ge=1, le=200),
     status: str = Query("all"),
     search: str = Query(""),
+    sort: str = Query(""),
 ):
     return storage.get_dealers_paginated(
         page=page, per_page=per_page,
         status_filter=status if status != "all" else None,
         search=search if search else None,
+        sort=sort if sort else None,
     )
 
 
